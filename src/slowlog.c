@@ -42,7 +42,7 @@
 #include "server.h"
 #include "slowlog.h"
 
-/* Create a new slowlog entry.
+/* 创建一条慢日志条目
  * Incrementing the ref count of all the objects retained is up to
  * this function. */
 slowlogEntry *slowlogCreateEntry(client *c, robj **argv, int argc, long long duration) {
@@ -53,15 +53,14 @@ slowlogEntry *slowlogCreateEntry(client *c, robj **argv, int argc, long long dur
     se->argc = slargc;
     se->argv = zmalloc(sizeof(robj*)*slargc);
     for (j = 0; j < slargc; j++) {
-        /* Logging too many arguments is a useless memory waste, so we stop
-         * at SLOWLOG_ENTRY_MAX_ARGC, but use the last argument to specify
-         * how many remaining arguments there were in the original command. */
+        /* 记录过多的参数是一种无用的内存浪费，我们最多记录SLOWLOG_ENTRY_MAX_ARGC个参数，
+         * 同时使用最后一个参数来指出在原始命令中还有多少参数 */
         if (slargc != argc && j == slargc-1) {
             se->argv[j] = createObject(OBJ_STRING,
                 sdscatprintf(sdsempty(),"... (%d more arguments)",
                 argc-slargc+1));
         } else {
-            /* Trim too long strings as well... */
+            /* 如果命令太长，我们就截断一下 */
             if (argv[j]->type == OBJ_STRING &&
                 sdsEncodedObject(argv[j]) &&
                 sdslen(argv[j]->ptr) > SLOWLOG_ENTRY_MAX_STRING)
@@ -81,6 +80,7 @@ slowlogEntry *slowlogCreateEntry(client *c, robj **argv, int argc, long long dur
                  * shared objects between any part of Redis, and the data
                  * structure holding the data, is a problem: FLUSHALL ASYNC
                  * may release the shared string object and create a race. */
+                /* 复制这些字符串对象 */
                 se->argv[j] = dupStringObject(argv[j]);
             }
         }
@@ -121,24 +121,29 @@ void slowlogInit(void) {
  * This function will make sure to trim the slow log accordingly to the
  * configured max length. */
 void slowlogPushEntryIfNeeded(client *c, robj **argv, int argc, long long duration) {
-    if (server.slowlog_log_slower_than < 0) return; /* Slowlog disabled */
+    if (server.slowlog_log_slower_than < 0) return; /* 当slowlog_log_slower_than<0，表示慢日志功能未开启 */
+    /* 如果超过了慢日志时长限制，则向链表头部插入一条慢日志 */
     if (duration >= server.slowlog_log_slower_than)
         listAddNodeHead(server.slowlog,
                         slowlogCreateEntry(c,argv,argc,duration));
 
-    /* Remove old entries if needed. */
+    /* 如果慢日志超过了slowlog_max_len限制，则从链表尾部删除一条慢日志 */
     while (listLength(server.slowlog) > server.slowlog_max_len)
         listDelNode(server.slowlog,listLast(server.slowlog));
 }
 
-/* Remove all the entries from the current slow log. */
+/* 清空当前的慢日志 */
 void slowlogReset(void) {
     while (listLength(server.slowlog) > 0)
         listDelNode(server.slowlog,listLast(server.slowlog));
 }
 
-/* The SLOWLOG command. Implements all the subcommands needed to handle the
- * Redis slow log. */
+/* SLOWLOG命令，实现了所有的子命令：
+ *  help - 打印帮助信息
+ *  len - 返回记录的慢查询日志长度
+ *  reset - 清空慢查询日志
+ *  get [count] - 返回最近的count条记录
+ * */
 void slowlogCommand(client *c) {
     if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"help")) {
         const char *help[] = {
@@ -154,6 +159,7 @@ NULL
         slowlogReset();
         addReply(c,shared.ok);
     } else if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"len")) {
+        // 返回慢日志链表长度
         addReplyLongLong(c,listLength(server.slowlog));
     } else if ((c->argc == 2 || c->argc == 3) &&
                !strcasecmp(c->argv[1]->ptr,"get"))
@@ -168,6 +174,7 @@ NULL
             getLongFromObjectOrReply(c,c->argv[2],&count,NULL) != C_OK)
             return;
 
+        // 遍历慢日志记录，逐渐写入到客户端，知道count为0或者链表全部遍历完成
         listRewind(server.slowlog,&li);
         totentries = addDeferredMultiBulkLength(c);
         while(count-- && (ln = listNext(&li))) {

@@ -87,7 +87,9 @@
 #endif
 #endif
 
-/* Define redis_fsync to fdatasync() in Linux and fsync() for all the rest */
+/* 定义redis_fsync在linux下为fdatasync()，以防止写元数据以优化一次IO操作，
+ * 但实际上在redis场景中是无用的，https://blog.csdn.net/cywosp/article/details/8767327；
+ * 在其他系统中为fsync() */
 #ifdef __linux__
 #define redis_fsync fdatasync
 #else

@@ -33,6 +33,7 @@
 /* Open a child-parent channel used in order to move information about the
  * RDB / AOF saving process from the child to the parent (for instance
  * the amount of copy on write memory used) */
+/* 打开一个从子进程到父进程的管道用来传输持久化过程中的信息 */
 void openChildInfoPipe(void) {
     if (pipe(server.child_info_pipe) == -1) {
         /* On error our two file descriptors should be still set to -1,
@@ -59,11 +60,13 @@ void closeChildInfoPipe(void) {
 
 /* Send COW data to parent. The child should call this function after populating
  * the corresponding fields it want to sent (according to the process type). */
+/* 把子进程的私有驻留内存数发送给父进程 */
 void sendChildInfo(int ptype) {
     if (server.child_info_pipe[1] == -1) return;
     server.child_info_data.magic = CHILD_INFO_MAGIC;
     server.child_info_data.process_type = ptype;
     ssize_t wlen = sizeof(server.child_info_data);
+    /* 发送child_info_data到管道child_info_pipe中 */
     if (write(server.child_info_pipe[1],&server.child_info_data,wlen) != wlen) {
         /* Nothing to do on error, this will be detected by the other side. */
     }

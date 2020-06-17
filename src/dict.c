@@ -940,7 +940,7 @@ static int _dictExpandIfNeeded(dict *d)
     return DICT_OK;
 }
 
-/* Our hash table capability is a power of two */
+/* 计算NextPower */
 static unsigned long _dictNextPower(unsigned long size)
 {
     unsigned long i = DICT_HT_INITIAL_SIZE;
@@ -992,10 +992,12 @@ void dictEmpty(dict *d, void(callback)(void*)) {
     d->iterators = 0;
 }
 
+// 启用扩容
 void dictEnableResize(void) {
     dict_can_resize = 1;
 }
 
+// 禁用扩容
 void dictDisableResize(void) {
     dict_can_resize = 0;
 }

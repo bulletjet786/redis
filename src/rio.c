@@ -3,7 +3,8 @@
  * and output devices. For instance the same rdb.c code using the rio
  * abstraction can be used to read and write the RDB format using in-memory
  * buffers or files.
- *
+ * rio是一个简单的面向流的I/O抽象，它可以从不同的输入/输出设备中生产或者消费数据。
+ * 比如rdb.c使用这个rio抽象来从内存缓冲区或者文件中读写数据。
  * A rio object provides the following methods:
  *  read: read from stream.
  *  write: write to stream.
@@ -12,7 +13,7 @@
  * It is also possible to set a 'checksum' method that is used by rio.c in order
  * to compute a checksum of the data written or read, or to query the rio object
  * for the current checksum.
- *
+ * 他也可以设置一个校验和的方法用来计算数据的检验和或者查询一个rio对象当前的校验和。
  * ----------------------------------------------------------------------------
  *
  * Copyright (c) 2009-2012, Pieter Noordhuis <pcnoordhuis at gmail dot com>
@@ -305,11 +306,12 @@ void rioSetAutoSync(rio *r, off_t bytes) {
 }
 
 /* --------------------------- Higher level interface --------------------------
- *
+ * 高级接口，用来在AOF中生成Redis协议格式内容
  * The following higher level functions use lower level rio.c functions to help
  * generating the Redis protocol for the Append Only File. */
 
 /* Write multi bulk count in the format: "*<count>\r\n". */
+/* 写入块数量 */
 size_t rioWriteBulkCount(rio *r, char prefix, long count) {
     char cbuf[128];
     int clen;
@@ -323,6 +325,7 @@ size_t rioWriteBulkCount(rio *r, char prefix, long count) {
 }
 
 /* Write binary-safe string in the format: "$<count>\r\n<payload>\r\n". */
+/* 写入二进制安全的块字符串 */
 size_t rioWriteBulkString(rio *r, const char *buf, size_t len) {
     size_t nwritten;
 
@@ -333,6 +336,7 @@ size_t rioWriteBulkString(rio *r, const char *buf, size_t len) {
 }
 
 /* Write a long long value in format: "$<count>\r\n<payload>\r\n". */
+/* 写入长整型内容 */
 size_t rioWriteBulkLongLong(rio *r, long long l) {
     char lbuf[32];
     unsigned int llen;
@@ -342,6 +346,7 @@ size_t rioWriteBulkLongLong(rio *r, long long l) {
 }
 
 /* Write a double value in the format: "$<count>\r\n<payload>\r\n" */
+/* 写入Double类型数据 */
 size_t rioWriteBulkDouble(rio *r, double d) {
     char dbuf[128];
     unsigned int dlen;

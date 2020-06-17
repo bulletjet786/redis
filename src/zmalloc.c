@@ -377,7 +377,7 @@ size_t zmalloc_get_smap_bytes_by_field(char *field, long pid) {
     return 0;
 }
 #endif
-
+/* 从/proc/self/smaps中获取私有主驻留内存数 */
 size_t zmalloc_get_private_dirty(long pid) {
     return zmalloc_get_smap_bytes_by_field("Private_Dirty:",pid);
 }

@@ -34,11 +34,11 @@
 typedef struct slowlogEntry {
     robj **argv;
     int argc;
-    long long id;       /* Unique entry identifier. */
-    long long duration; /* Time spent by the query, in microseconds. */
-    time_t time;        /* Unix time at which the query was executed. */
-    sds cname;          /* Client name. */
-    sds peerid;         /* Client network address. */
+    long long id;       /* 慢日志ID */
+    long long duration; /* 执行时长，微秒 */
+    time_t time;        /* 开始执行的时间 */
+    sds cname;          /* 客户端名 */
+    sds peerid;         /* 客户端网络地址 */
 } slowlogEntry;
 
 /* Exported API */

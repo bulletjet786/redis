@@ -44,8 +44,7 @@
 #include "zmalloc.h"
 #include "config.h"
 
-/* Include the best multiplexing layer supported by this system.
- * The following should be ordered by performances, descending. */
+/* 通过宏来为不同的操作系统选择不同的多路复用框架来支撑AE事件框架 */
 #ifdef HAVE_EVPORT
 #include "ae_evport.c"
 #else
@@ -133,6 +132,11 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+/* 在事件循环框架中添加一个文件事件
+ * fd 文件描述符
+ * mask 要关注的事件类型，AE_READABLE读事件，AE_WRITABLE写事件
+ * proc 当指定的事件发生时，要执行的事件
+ * */
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
 {
@@ -153,6 +157,7 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
     return AE_OK;
 }
 
+/* 从事件循环框架中删除一个文件事件 */
 void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
 {
     if (fd >= eventLoop->setsize) return;
@@ -175,6 +180,7 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
     }
 }
 
+/* 获取一个文件描述符正在监听的IO事件类型 */
 int aeGetFileEvents(aeEventLoop *eventLoop, int fd) {
     if (fd >= eventLoop->setsize) return 0;
     aeFileEvent *fe = &eventLoop->events[fd];
@@ -205,6 +211,7 @@ static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) 
     *ms = when_ms;
 }
 
+/* 注册一个时间事件，该事件将在milliseconds之后到达，执行proc函数，clientData为事件注册方关联上来的数据 */
 long long aeCreateTimeEvent(aeEventLoop *eventLoop, long long milliseconds,
         aeTimeProc *proc, void *clientData,
         aeEventFinalizerProc *finalizerProc)
@@ -240,22 +247,13 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id)
     return AE_ERR; /* NO event with the specified ID found */
 }
 
-/* Search the first timer to fire.
- * This operation is useful to know how many time the select can be
- * put in sleep without to delay any event.
- * If there are no timers NULL is returned.
- *
- * Note that's O(N) since time events are unsorted.
- * Possible optimizations (not needed by Redis so far, but...):
- * 1) Insert the event in order, so that the nearest is just the head.
- *    Much better but still insertion or deletion of timers is O(N).
- * 2) Use a skiplist to have this operation as O(1) and insertion as O(log(N)).
- */
+/* 查找最近达到的定时器，如果没有定时器，返回NULL */
 static aeTimeEvent *aeSearchNearestTimer(aeEventLoop *eventLoop)
 {
     aeTimeEvent *te = eventLoop->timeEventHead;
     aeTimeEvent *nearest = NULL;
 
+    // 遍历链表，找到一个最近的
     while(te) {
         if (!nearest || te->when_sec < nearest->when_sec ||
                 (te->when_sec == nearest->when_sec &&
@@ -372,6 +370,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         aeTimeEvent *shortest = NULL;
         struct timeval tv, *tvp;
 
+        /* 获取最近的时间事件到达事件，用于在监听文件事件时的超时时间 */
         if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
             shortest = aeSearchNearestTimer(eventLoop);
         if (shortest) {
@@ -380,8 +379,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             aeGetTime(&now_sec, &now_ms);
             tvp = &tv;
 
-            /* How many milliseconds we need to wait for the next
-             * time event to fire? */
+            /* 计算超时事件，转化为timeval结构体 */
             long long ms =
                 (shortest->when_sec - now_sec)*1000 +
                 shortest->when_ms - now_ms;
@@ -401,36 +399,30 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
                 tv.tv_sec = tv.tv_usec = 0;
                 tvp = &tv;
             } else {
-                /* Otherwise we can block */
+                /* 在没有时间事件且AE_DONT_WAIT未设置时则一直阻塞知道文件事件到达 */
                 tvp = NULL; /* wait forever */
             }
         }
 
-        /* Call the multiplexing API, will return only on timeout or when
-         * some event fires. */
+        /* 调用IO多路复用监听文件事件，返回时会将就绪的文件事件放入fired数组中，同时返回就绪的文件描述符数量 */
         numevents = aeApiPoll(eventLoop, tvp);
 
-        /* After sleep callback. */
+        /* 当从文件事件监听中醒来时，先调用aftersleep hook函数 */
         if (eventLoop->aftersleep != NULL && flags & AE_CALL_AFTER_SLEEP)
             eventLoop->aftersleep(eventLoop);
 
+        /* 处理文件事件 */
         for (j = 0; j < numevents; j++) {
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
             int mask = eventLoop->fired[j].mask;
             int fd = eventLoop->fired[j].fd;
             int fired = 0; /* Number of events fired for current fd. */
 
-            /* Normally we execute the readable event first, and the writable
-             * event laster. This is useful as sometimes we may be able
-             * to serve the reply of a query immediately after processing the
-             * query.
-             *
-             * However if AE_BARRIER is set in the mask, our application is
-             * asking us to do the reverse: never fire the writable event
-             * after the readable. In such a case, we invert the calls.
-             * This is useful when, for instance, we want to do things
-             * in the beforeSleep() hook, like fsynching a file to disk,
-             * before replying to a client. */
+            /* 一般情况下我们先处理读事件，后处理写事件，这样我们可以优先回复响应。
+             * 当设置了AE_BARRIER位时，我们将先处理写事件，后处理读事件。当我们想
+             * 在回复给客户端时先在beforeSleep()钩子函数中执行序列化到磁盘的操作时，
+             * 这个特性就变得很有用了。
+             * */
             int invert = fe->mask & AE_BARRIER;
 
             /* Note the "fe->mask & mask & ..." code: maybe an already
@@ -464,7 +456,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             processed++;
         }
     }
-    /* Check time events */
+    /* 处理时间事件 */
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
 

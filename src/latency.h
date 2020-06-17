@@ -66,7 +66,7 @@ void latencyAddSample(char *event, mstime_t latency);
 int THPIsEnabled(void);
 
 /* Latency monitoring macros. */
-
+/* 延迟监控的宏 */
 /* Start monitoring an event. We just set the current time. */
 #define latencyStartMonitor(var) if (server.latency_monitor_threshold) { \
     var = mstime(); \

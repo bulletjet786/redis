@@ -527,6 +527,7 @@ void hsetnxCommand(client *c) {
     }
 }
 
+/* hset命令和hmset命令实现 */
 void hsetCommand(client *c) {
     int i, created = 0;
     robj *o;
@@ -536,13 +537,15 @@ void hsetCommand(client *c) {
         return;
     }
 
+    /* 查找key */
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
     hashTypeTryConversion(o,c->argv,2,c->argc-1);
 
+    /* 将[field,value]写入到DB中 */
     for (i = 2; i < c->argc; i += 2)
         created += !hashTypeSet(o,c->argv[i]->ptr,c->argv[i+1]->ptr,HASH_SET_COPY);
 
-    /* HMSET (deprecated) and HSET return value is different. */
+    /* HMSET返回+OK,而HSET返回添加的field个数 */
     char *cmdname = c->argv[0]->ptr;
     if (cmdname[1] == 's' || cmdname[1] == 'S') {
         /* HSET */
@@ -551,6 +554,7 @@ void hsetCommand(client *c) {
         /* HMSET */
         addReply(c, shared.ok);
     }
+    /* 处理乐观锁Watch，将所有watch该key的所有Client置CLIENT_DIRTY—CAS */
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);
     server.dirty++;
@@ -672,6 +676,7 @@ static void addHashFieldToReply(client *c, robj *o, sds field) {
     }
 }
 
+/* hget命令实现 */
 void hgetCommand(client *c) {
     robj *o;
 

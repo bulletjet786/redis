@@ -300,6 +300,10 @@ void replicationFeedSlavesFromMasterStream(list *slaves, char *buf, size_t bufle
     }
 }
 
+/* 向监视器发送监视命令信息：
+ * protocol:    unix_stamp [database_id client] full_cmd
+ * example:     1378822099.421623 [0 127.0.0.1:56604] "SET" "msg" "hello world"
+ * */
 void replicationFeedMonitors(client *c, list *monitors, int dictid, robj **argv, int argc) {
     listNode *ln;
     listIter li;
@@ -308,6 +312,7 @@ void replicationFeedMonitors(client *c, list *monitors, int dictid, robj **argv,
     robj *cmdobj;
     struct timeval tv;
 
+    /* 写unix_stamp,database_id,client到cmdrepr中 */
     gettimeofday(&tv,NULL);
     cmdrepr = sdscatprintf(cmdrepr,"%ld.%06ld ",(long)tv.tv_sec,(long)tv.tv_usec);
     if (c->flags & CLIENT_LUA) {
@@ -318,6 +323,7 @@ void replicationFeedMonitors(client *c, list *monitors, int dictid, robj **argv,
         cmdrepr = sdscatprintf(cmdrepr,"[%d %s] ",dictid,getClientPeerId(c));
     }
 
+    /* 向cmdrepr中写入命令 */
     for (j = 0; j < argc; j++) {
         if (argv[j]->encoding == OBJ_ENCODING_INT) {
             cmdrepr = sdscatprintf(cmdrepr, "\"%ld\"", (long)argv[j]->ptr);
@@ -328,9 +334,11 @@ void replicationFeedMonitors(client *c, list *monitors, int dictid, robj **argv,
         if (j != argc-1)
             cmdrepr = sdscatlen(cmdrepr," ",1);
     }
+    /* 创建监视消息对象 */
     cmdrepr = sdscatlen(cmdrepr,"\r\n",2);
     cmdobj = createObject(OBJ_STRING,cmdrepr);
 
+    /* 遍历监视器，发送监视消息 */
     listRewind(monitors,&li);
     while((ln = listNext(&li))) {
         client *monitor = ln->value;

@@ -221,14 +221,14 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
     return count;
 }
 
-/* Publish a message */
+/* 向订阅/发布频道中发布一条消息 */
 int pubsubPublishMessage(robj *channel, robj *message) {
     int receivers = 0;
     dictEntry *de;
     listNode *ln;
     listIter li;
 
-    /* Send to clients listening for that channel */
+    /* 向所有监听这个频道的客户端发送该消息 */
     de = dictFind(server.pubsub_channels,channel);
     if (de) {
         list *list = dictGetVal(de);
@@ -246,7 +246,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
             receivers++;
         }
     }
-    /* Send to clients listening to matching channels */
+    /* 向所有符合模式订阅该频道的客户端发送该消息 */
     if (listLength(server.pubsub_patterns)) {
         listRewind(server.pubsub_patterns,&li);
         channel = getDecodedObject(channel);

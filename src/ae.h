@@ -67,45 +67,48 @@ typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *client
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
-/* File event structure */
+/* 文件事件 */
 typedef struct aeFileEvent {
-    int mask; /* one of AE_(READABLE|WRITABLE|BARRIER) */
-    aeFileProc *rfileProc;
-    aeFileProc *wfileProc;
+    int mask; /* 关注的事件类型，可读、可写、可阻塞 one of AE_(READABLE|WRITABLE|BARRIER) */
+    aeFileProc *rfileProc;  // 当触发读事件时执行执行该函数
+    aeFileProc *wfileProc;  // 当触发写事件时执行执行该函数
     void *clientData;
 } aeFileEvent;
 
-/* Time event structure */
+/* 时间事件 */
 typedef struct aeTimeEvent {
     long long id; /* time event identifier. */
+    // 触发的时间点
     long when_sec; /* seconds */
     long when_ms; /* milliseconds */
-    aeTimeProc *timeProc;
+    aeTimeProc *timeProc;   /* 当该时间事件达到时，所执行的事件函数 */
     aeEventFinalizerProc *finalizerProc;
     void *clientData;
+    // 双向链表
     struct aeTimeEvent *prev;
     struct aeTimeEvent *next;
 } aeTimeEvent;
 
-/* A fired event */
+/* 激活的文件事件 */
 typedef struct aeFiredEvent {
     int fd;
     int mask;
 } aeFiredEvent;
 
-/* State of an event based program */
+/* AE事件驱动框架状态数据 */
 typedef struct aeEventLoop {
-    int maxfd;   /* highest file descriptor currently registered */
-    int setsize; /* max number of file descriptors tracked */
-    long long timeEventNextId;
+    int maxfd;   /* 当前注册的最大的文件描述符 */
+    int setsize; /* 文件描述符集合中的可以监听的最大文件描述符限制 */
+    long long timeEventNextId; /* 下一个待注册的时间事件id */
     time_t lastTime;     /* Used to detect system clock skew */
-    aeFileEvent *events; /* Registered events */
-    aeFiredEvent *fired; /* Fired events */
-    aeTimeEvent *timeEventHead;
-    int stop;
-    void *apidata; /* This is used for polling API specific data */
-    aeBeforeSleepProc *beforesleep;
-    aeBeforeSleepProc *aftersleep;
+    aeFileEvent *events; /* 当前注册的事件动态数组 */
+    aeFiredEvent *fired; /* 当前就绪的文件事件动态数组 */
+    /* 使用优先队列更好，堆头为最近触发时间的结点，这样aeSearchNearestTimer不需要遍历，但是插入时需要O(N)；因目前该链表只有一个时间事件处理器，那么实际上性能没有影响 */
+    aeTimeEvent *timeEventHead;     /* 时间事件双向链表，在每个周期中进行遍历，如果当前时间到达或超过when，则触发timeProc函数 */
+    int stop;           /* 当不为0时退出事件循环流程 */
+    void *apidata; /* 用于保存不同的IO框架自身的数据 */
+    aeBeforeSleepProc *beforesleep; /* 在进入监听io事件前调用 */
+    aeBeforeSleepProc *aftersleep; /* 在捕获到io事件醒来时调用 */
 } aeEventLoop;
 
 /* Prototypes */

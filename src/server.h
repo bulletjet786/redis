@@ -225,29 +225,29 @@ typedef long long mstime_t; /* millisecond time type. */
 #define AOF_WAIT_REWRITE 2    /* AOF waits rewrite to start appending */
 
 /* Client flags */
-#define CLIENT_SLAVE (1<<0)   /* This client is a slave server */
-#define CLIENT_MASTER (1<<1)  /* This client is a master server */
+#define CLIENT_SLAVE (1<<0)   /* 从服务器 */
+#define CLIENT_MASTER (1<<1)  /* 主服务器 */
 #define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
-#define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context */
-#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation */
-#define CLIENT_DIRTY_CAS (1<<5) /* Watched keys modified. EXEC will fail. */
-#define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* Close after writing entire reply. */
+#define CLIENT_MULTI (1<<3)   /* client正在执行事务 */
+#define CLIENT_BLOCKED (1<<4) /* client正在被BRPOP、BLPOP之类的命令阻塞 */
+#define CLIENT_DIRTY_CAS (1<<5) /* 事务中watch的key被修改了，之后的EXEC命令将会失败 */
+#define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* 服务端端在发送完整的回复后将会关闭客户端，一般是Client kill命令或错误的协议引起的 */
 #define CLIENT_UNBLOCKED (1<<7) /* This client was unblocked and is stored in
                                   server.unblocked_clients */
 #define CLIENT_LUA (1<<8) /* This is a non connected client used by Lua */
 #define CLIENT_ASKING (1<<9)     /* Client issued the ASKING command */
-#define CLIENT_CLOSE_ASAP (1<<10)/* Close this client ASAP */
-#define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
-#define CLIENT_DIRTY_EXEC (1<<12)  /* EXEC will fail for errors while queueing */
+#define CLIENT_CLOSE_ASAP (1<<10)/* 缓冲区大小超过了限制，在下一次serverCron中将会关闭，缓冲区中的内容将会直接释放 */
+#define CLIENT_UNIX_SOCKET (1<<11) /* 客户端正在通过UNIX套接字连接服务 */
+#define CLIENT_DIRTY_EXEC (1<<12)  /* 命令入队时发生了失败，EXEC将会失败 */
 #define CLIENT_MASTER_FORCE_REPLY (1<<13)  /* Queue replies even if is master */
 #define CLIENT_FORCE_AOF (1<<14)   /* Force AOF propagation of current cmd. */
 #define CLIENT_FORCE_REPL (1<<15)  /* Force replication of current cmd. */
 #define CLIENT_PRE_PSYNC (1<<16)   /* Instance don't understand PSYNC. */
 #define CLIENT_READONLY (1<<17)    /* Cluster client is in read-only state. */
 #define CLIENT_PUBSUB (1<<18)      /* Client is in Pub/Sub mode. */
-#define CLIENT_PREVENT_AOF_PROP (1<<19)  /* Don't propagate to AOF. */
-#define CLIENT_PREVENT_REPL_PROP (1<<20)  /* Don't propagate to slaves. */
-#define CLIENT_PREVENT_PROP (CLIENT_PREVENT_AOF_PROP|CLIENT_PREVENT_REPL_PROP)
+#define CLIENT_PREVENT_AOF_PROP (1<<19)  /* 不传播到AOF文件中. */
+#define CLIENT_PREVENT_REPL_PROP (1<<20)  /* 不传播到从服务器 */
+#define CLIENT_PREVENT_PROP (CLIENT_PREVENT_AOF_PROP|CLIENT_PREVENT_REPL_PROP) /* 总是不进行传播 */
 #define CLIENT_PENDING_WRITE (1<<21) /* Client has output to send but a write
                                         handler is yet not installed. */
 #define CLIENT_REPLY_OFF (1<<22)   /* Don't send replies to client. */
@@ -268,7 +268,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define BLOCKED_ZSET 5    /* BZPOP et al. */
 #define BLOCKED_NUM 6     /* Number of blocked states. */
 
-/* Client request types */
+/* 客户端请求协议类型 */
 #define PROTO_REQ_INLINE 1
 #define PROTO_REQ_MULTIBULK 2
 
@@ -349,7 +349,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define ZSKIPLIST_MAXLEVEL 64 /* Should be enough for 2^64 elements */
 #define ZSKIPLIST_P 0.25      /* Skiplist P = 1/4 */
 
-/* Append only defines */
+/* AOF fsync策略类型，从不，总是，每秒，默认是每秒 */
 #define AOF_FSYNC_NO 0
 #define AOF_FSYNC_ALWAYS 1
 #define AOF_FSYNC_EVERYSEC 2
@@ -430,6 +430,7 @@ typedef long long mstime_t; /* millisecond time type. */
 
 /* Keyspace changes notification classes. Every class is associated with a
  * character for configuration purposes. */
+/* 键空间变更提醒分类 */
 #define NOTIFY_KEYSPACE (1<<0)    /* K */
 #define NOTIFY_KEYEVENT (1<<1)    /* E */
 #define NOTIFY_GENERIC (1<<2)     /* g */
@@ -623,8 +624,7 @@ typedef struct redisObject {
 
 struct evictionPoolEntry; /* Defined in evict.c */
 
-/* This structure is used in order to represent the output buffer of a client,
- * which is actually a linked list of blocks like that, that is: client->reply. */
+/* client->reply链表中的Node动态缓冲区，利用了柔性数组的性质 */
 typedef struct clientReplyBlock {
     size_t size, used;
     char buf[];
@@ -634,11 +634,11 @@ typedef struct clientReplyBlock {
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
 typedef struct redisDb {
-    dict *dict;                 /* The keyspace for this DB */
-    dict *expires;              /* Timeout of keys with a timeout set */
-    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP)*/
-    dict *ready_keys;           /* Blocked keys that received a PUSH */
-    dict *watched_keys;         /* WATCHED keys for MULTI/EXEC CAS */
+    dict *dict;                 /* 键空间hash<<key, value>> */
+    dict *expires;              /* 过期时间hash<<key, timeout>> */
+    dict *blocking_keys;        /* 客户端等待的blocked keys (BLPOP)*/
+    dict *ready_keys;           /* 就绪的blacked key, Blocked keys that received a PUSH */
+    dict *watched_keys;         /* 乐观锁监控的key */
     int id;                     /* Database ID */
     long long avg_ttl;          /* Average TTL, just for stats */
     list *defrag_later;         /* List of key names to attempt to defrag one by one, gradually. */
@@ -707,32 +707,31 @@ typedef struct readyList {
 /* With multiplexing we need to take per-client state.
  * Clients are taken in a linked list. */
 typedef struct client {
-    uint64_t id;            /* Client incremental unique ID. */
-    int fd;                 /* Client socket. */
-    redisDb *db;            /* Pointer to currently SELECTed DB. */
-    robj *name;             /* As set by CLIENT SETNAME. */
-    sds querybuf;           /* Buffer we use to accumulate client queries. */
-    size_t qb_pos;          /* The position we have read in querybuf. */
+    uint64_t id;            /* 递增唯一标识符 */
+    int fd;                 /* socket文件描述符 */
+    redisDb *db;            /* client选择的DB */
+    robj *name;             /* 通过命令 CLIENT SETNAME. 设置 */
+    sds querybuf;           /* 用于积累客户端请求的缓冲区 */
+    size_t qb_pos;          /* 当前读到的缓冲区位置 */
     sds pending_querybuf;   /* If this client is flagged as master, this buffer
                                represents the yet not applied portion of the
                                replication stream that we are receiving from
                                the master. */
     size_t querybuf_peak;   /* Recent (100ms or more) peak of querybuf size. */
-    int argc;               /* Num of arguments of current command. */
-    robj **argv;            /* Arguments of current command. */
-    struct redisCommand *cmd, *lastcmd;  /* Last command executed. */
-    int reqtype;            /* Request protocol type: PROTO_REQ_* */
-    int multibulklen;       /* Number of multi bulk arguments left to read. */
-    long bulklen;           /* Length of bulk argument in multi bulk request. */
-    list *reply;            /* List of reply objects to send to the client. */
-    unsigned long long reply_bytes; /* Tot bytes of objects in reply list. */
-    size_t sentlen;         /* Amount of bytes already sent in the current
-                               buffer or object being sent. */
-    time_t ctime;           /* Client creation time. */
-    time_t lastinteraction; /* Time of the last interaction, used for timeout */
+    int argc;               /* 当前命令的参数数量 */
+    robj **argv;            /* 当前命令参数 */
+    struct redisCommand *cmd, *lastcmd;  /* 最后一个执行过的命令 */
+    int reqtype;            /* 请求的协议类型：PROTO_REQ_INLINE、PROTO_REQ_MULTIBULK */
+    int multibulklen;       /* 当前命令还有多少个块未读取 */
+    long bulklen;           /* 当前命令块有多少个字节 */
+    list *reply;            /* 准备发送给客户端的object列表 */
+    unsigned long long reply_bytes; /* 动态缓冲区中大小 */
+    size_t sentlen;         /* 当前已经发送到的缓冲区位置（同时用户静态和动态两个缓冲区） */
+    time_t ctime;           /* 创建时间 */
+    time_t lastinteraction; /* 最后一次交互的时间，用于处理Timeout */
     time_t obuf_soft_limit_reached_time;
     int flags;              /* Client flags: CLIENT_* macros. */
-    int authenticated;      /* When requirepass is non-NULL. */
+    int authenticated;      /* 是否进行了密码验证 */
     int replstate;          /* Replication state if this is a slave. */
     int repl_put_online_on_ack; /* Install slave write handler on ACK. */
     int repldbfd;           /* Replication DB file descriptor. */
@@ -754,13 +753,13 @@ typedef struct client {
     int btype;              /* Type of blocking op if CLIENT_BLOCKED. */
     blockingState bpop;     /* blocking state */
     long long woff;         /* Last write global replication offset. */
-    list *watched_keys;     /* Keys WATCHED for MULTI/EXEC CAS */
-    dict *pubsub_channels;  /* channels a client is interested in (SUBSCRIBE) */
-    list *pubsub_patterns;  /* patterns a client is interested in (SUBSCRIBE) */
+    list *watched_keys;     /* 事务中watch监控的keys */
+    dict *pubsub_channels;  /* 客户端订阅的频道 */
+    list *pubsub_patterns;  /* 客户端订阅的频道的模式 */
     sds peerid;             /* Cached peer ID. */
-    listNode *client_list_node; /* list node in client list */
+    listNode *client_list_node; /* 单向链表 */
 
-    /* Response buffer */
+    /* 回复给客户端的静态缓冲区，如果缓冲区满则写入到reply链表中 */
     int bufpos;
     char buf[PROTO_REPLY_CHUNK_BYTES];
 } client;
@@ -935,8 +934,8 @@ struct redisServer {
                                    is enabled. */
     int hz;                     /* serverCron() calls frequency in hertz */
     redisDb *db;
-    dict *commands;             /* Command table */
-    dict *orig_commands;        /* Command table before command renaming. */
+    dict *commands;             /* 主命令映射表 */
+    dict *orig_commands;        /* 备用命令映射表，和主命令映射表构成双buffer，在替换表时可以通过切换减少替换时间 */
     aeEventLoop *el;
     unsigned int lruclock;      /* Clock for LRU eviction */
     int shutdown_asap;          /* SHUTDOWN needed ASAP */
@@ -945,7 +944,7 @@ struct redisServer {
     char *requirepass;          /* Pass for AUTH command, or NULL */
     char *pidfile;              /* PID file path */
     int arch_bits;              /* 32 or 64 depending on sizeof(long) */
-    int cronloops;              /* Number of times the cron function run */
+    int cronloops;              /* 周期函数启动的次数 */
     char runid[CONFIG_RUN_ID_SIZE+1];  /* ID always different at every exec. */
     int sentinel_mode;          /* True if this instance is a Sentinel. */
     size_t initial_memory_usage; /* Bytes used after initialization. */
@@ -986,7 +985,7 @@ struct redisServer {
     off_t loading_loaded_bytes;
     time_t loading_start_time;
     off_t loading_process_events_interval_bytes;
-    /* Fast pointers to often looked up command */
+    /* 经常使用的命令的快速指针 */
     struct redisCommand *delCommand, *multiCommand, *lpushCommand,
                         *lpopCommand, *rpopCommand, *zpopminCommand,
                         *zpopmaxCommand, *sremCommand, *execCommand,
@@ -1013,10 +1012,10 @@ struct redisServer {
     long long stat_sync_full;       /* Number of full resyncs with slaves. */
     long long stat_sync_partial_ok; /* Number of accepted PSYNC requests. */
     long long stat_sync_partial_err;/* Number of unaccepted PSYNC requests. */
-    list *slowlog;                  /* SLOWLOG list of commands */
-    long long slowlog_entry_id;     /* SLOWLOG current entry ID */
-    long long slowlog_log_slower_than; /* SLOWLOG time limit (to get logged) */
-    unsigned long slowlog_max_len;     /* SLOWLOG max number of items logged */
+    list *slowlog;                  /* 慢查询日志命令队列 */
+    long long slowlog_entry_id;     /* 当前最新的慢查询日志的ID */
+    long long slowlog_log_slower_than; /* 超过slowlog_log_slower_than微秒的将会被记录 */
+    unsigned long slowlog_max_len;     /* 慢日志队列队列长度FIFO，在超过长度后，旧的慢日志将会被抛弃 */
     struct malloc_stats cron_malloc_stats; /* sampled in serverCron(). */
     long long stat_net_input_bytes; /* Bytes read from network. */
     long long stat_net_output_bytes; /* Bytes written to network. */
@@ -1049,8 +1048,8 @@ struct redisServer {
     int daemonize;                  /* True if running as a daemon */
     clientBufferLimitsConfig client_obuf_limits[CLIENT_TYPE_OBUF_COUNT];
     /* AOF persistence */
-    int aof_state;                  /* AOF_(ON|OFF|WAIT_REWRITE) */
-    int aof_fsync;                  /* Kind of fsync() policy */
+    int aof_state;                  /* AOF_(ON|OFF|WAIT_REWRITE) AOF状态：打开，关闭，AOF重写等待 */
+    int aof_fsync;                  /* fsync策略类型 */
     char *aof_filename;             /* Name of the AOF file */
     int aof_no_fsync_on_rewrite;    /* Don't fsync if a rewrite is in prog. */
     int aof_rewrite_perc;           /* Rewrite AOF if % growth is > M and... */
@@ -1059,12 +1058,12 @@ struct redisServer {
     off_t aof_current_size;         /* AOF current size. */
     int aof_rewrite_scheduled;      /* Rewrite once BGSAVE terminates. */
     pid_t aof_child_pid;            /* PID if rewriting process */
-    list *aof_rewrite_buf_blocks;   /* Hold changes during an AOF rewrite. */
-    sds aof_buf;      /* AOF buffer, written before entering the event loop */
+    list *aof_rewrite_buf_blocks;   /* 在AOF重写时保存数据变更 */
+    sds aof_buf;      /* AOF缓冲区，在事件循环周期beforeSleep()阶段进行写入 AOF buffer, written before entering the event loop */
     int aof_fd;       /* File descriptor of currently selected AOF file */
     int aof_selected_db; /* Currently selected DB in AOF */
-    time_t aof_flush_postponed_start; /* UNIX time of postponed AOF flush */
-    time_t aof_last_fsync;            /* UNIX time of last fsync() */
+    time_t aof_flush_postponed_start; /* 设置延期的AOF刷新的UNIX时间点 */
+    time_t aof_last_fsync;            /* 最后一次进行fsync()的时间点 */
     time_t aof_rewrite_time_last;   /* Time used by last AOF rewrite run. */
     time_t aof_rewrite_time_start;  /* Current AOF rewrite start time. */
     int aof_lastbgrewrite_status;   /* C_OK or C_ERR */
@@ -1076,7 +1075,7 @@ struct redisServer {
     int aof_load_truncated;         /* Don't stop on unexpected AOF EOF. */
     int aof_use_rdb_preamble;       /* Use RDB preamble on AOF rewrites. */
     /* AOF pipes used to communicate between parent and child during rewrite. */
-    int aof_pipe_write_data_to_child;
+    int aof_pipe_write_data_to_child;  /* AOF重写时的 */
     int aof_pipe_read_data_from_parent;
     int aof_pipe_write_ack_to_parent;
     int aof_pipe_read_ack_from_child;
@@ -1108,8 +1107,8 @@ struct redisServer {
     int child_info_pipe[2];         /* Pipe used to write the child_info_data. */
     struct {
         int process_type;           /* AOF or RDB child? */
-        size_t cow_size;            /* Copy on write size. */
-        unsigned long long magic;   /* Magic value to make sure data is valid. */
+        size_t cow_size;            /* 子进程中写时复制内存数（子进程私有驻留内存数） */
+        unsigned long long magic;   /* Magic value to make sure data is valid. 确保该数据是合法的 */
     } child_info_data;
     /* Propagation of commands in AOF / replication */
     redisOpArray also_propagate;    /* Additional command to propagate. */
@@ -1179,7 +1178,7 @@ struct redisServer {
     list *clients_waiting_acks;         /* Clients waiting in WAIT command. */
     int get_ack_from_slaves;            /* If true we send REPLCONF GETACK. */
     /* Limits */
-    unsigned int maxclients;            /* Max number of simultaneous clients */
+    unsigned int maxclients;            /* 同时打开的客户端链接最大数 Max number of simultaneous clients */
     unsigned long long maxmemory;   /* Max number of memory bytes to use */
     int maxmemory_policy;           /* Policy for key eviction */
     int maxmemory_samples;          /* Pricision of random sampling */
@@ -1238,10 +1237,10 @@ struct redisServer {
                                       native Redis Cluster features. Check the
                                       REDISMODULE_CLUSTER_FLAG_*. */
     /* Scripting */
-    lua_State *lua; /* The Lua interpreter. We use just one for all clients */
-    client *lua_client;   /* The "fake client" to query Redis from Lua */
+    lua_State *lua; /* Lua解释器，所有的客户端都会使用同一个解释器 */
+    client *lua_client;   /* 用于执行redis命令的伪客户端 */
     client *lua_caller;   /* The client running EVAL right now, or NULL */
-    dict *lua_scripts;         /* A dictionary of SHA1 -> Lua scripts */
+    dict *lua_scripts;         /* 脚本字典 SHA1 -> Lua scripts */
     unsigned long long lua_scripts_mem;  /* Cached scripts' memory + oh */
     mstime_t lua_time_limit;  /* Script timeout in milliseconds */
     mstime_t lua_time_start;  /* Start time of script, milliseconds time */
@@ -1287,9 +1286,9 @@ typedef struct pubsubPattern {
 typedef void redisCommandProc(client *c);
 typedef int *redisGetKeysProc(struct redisCommand *cmd, robj **argv, int argc, int *numkeys);
 struct redisCommand {
-    char *name;
-    redisCommandProc *proc;
-    int arity;
+    char *name;     // 命令名：如SET
+    redisCommandProc *proc; // 命令函数
+    int arity; // 参数个数
     char *sflags; /* Flags as string representation, one char per flag. */
     int flags;    /* The actual flags, obtained from the 'sflags' field. */
     /* Use a function to determine keys arguments in a command line.

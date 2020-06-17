@@ -154,12 +154,17 @@ void psetexCommand(client *c) {
     setGenericCommand(c,OBJ_SET_NO_FLAGS,c->argv[1],c->argv[3],c->argv[2],UNIT_MILLISECONDS,NULL,NULL);
 }
 
+/* 通用的get函数 */
 int getGenericCommand(client *c) {
     robj *o;
 
+    // 如果找不到该对象，则回复shared.nullbulk: $-1\r\n
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
         return C_OK;
 
+    /* 如果找到的对象不是OBJ_STRING类型，则回复shared.wrongtypeerr: -WRONGTYPE Operation against a key holding the wrong kind of value\r\n
+     * 否则回复:$3\r\nbar\r\n
+     * */
     if (o->type != OBJ_STRING) {
         addReply(c,shared.wrongtypeerr);
         return C_ERR;
@@ -168,7 +173,9 @@ int getGenericCommand(client *c) {
         return C_OK;
     }
 }
-
+/* {"get",getCommand,2,"rF",0,NULL,1,1,1,0,0}
+ * GET foo
+ * */
 void getCommand(client *c) {
     getGenericCommand(c);
 }

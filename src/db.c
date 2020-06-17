@@ -148,6 +148,7 @@ robj *lookupKeyWrite(redisDb *db, robj *key) {
     return lookupKey(db,key,LOOKUP_NONE);
 }
 
+/* 从数据库中找到key对应的对象，如果找不到回复reply */
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply) {
     robj *o = lookupKeyRead(c->db, key);
     if (!o) addReply(c,reply);
@@ -379,17 +380,17 @@ int selectDb(client *c, int id) {
 
 /*-----------------------------------------------------------------------------
  * Hooks for key space changes.
- *
+ * 键空间变更的钩子函数
  * Every time a key in the database is modified the function
  * signalModifiedKey() is called.
  *
  * Every time a DB is flushed the function signalFlushDb() is called.
  *----------------------------------------------------------------------------*/
-
+/* 每次键被修改时 */
 void signalModifiedKey(redisDb *db, robj *key) {
     touchWatchedKey(db,key);
 }
-
+/* 每次数据库被flush时 */
 void signalFlushedDb(int dbid) {
     touchWatchedKeysOnFlush(dbid);
 }

@@ -78,6 +78,7 @@ void discardTransaction(client *c) {
 
 /* Flag the transacation as DIRTY_EXEC so that EXEC will fail.
  * Should be called every time there is an error while queueing a command. */
+/* 如果客户端处于事务中，添加CLIENT_DIRTY_EXEC标志位，使得后续的EXEC指令失败 */
 void flagTransaction(client *c) {
     if (c->flags & CLIENT_MULTI)
         c->flags |= CLIENT_DIRTY_EXEC;
@@ -271,8 +272,7 @@ void unwatchAllKeys(client *c) {
     }
 }
 
-/* "Touch" a key, so that if this key is being WATCHed by some client the
- * next EXEC will fail. */
+/* 将Watch当前key的所有Client结构体的flags中的CLIENT_DIRTY_CAS置位，以使得在执行EXEC时乐观锁失败 */
 void touchWatchedKey(redisDb *db, robj *key) {
     list *clients;
     listIter li;

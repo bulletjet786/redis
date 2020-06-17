@@ -66,7 +66,7 @@ struct sharedObjectsStruct shared;
 
 double R_Zero, R_PosInf, R_NegInf, R_Nan;
 
-/*================================= Globals ================================= */
+/*================================= 全局对象 ================================= */
 
 /* Global vars */
 struct redisServer server; /* Server global state */
@@ -78,8 +78,8 @@ volatile unsigned long lru_clock; /* Server global current LRU time. */
  *
  * name: a string representing the command name.
  * function: pointer to the C function implementing the command.
- * arity: number of arguments, it is possible to use -N to say >= N
- * sflags: command flags as string. See below for a table of flags.
+ * arity: number of arguments, it is possible to use -N to say >= N 参数个数，使用-N表示>=N
+ * sflags: command flags as string. See below for a table of flags. 命令标志位
  * flags: flags as bitmask. Computed by Redis using the 'sflags' field.
  * get_keys_proc: an optional function to get key arguments from a command.
  *                This is only used when the following three fields are not
@@ -100,23 +100,23 @@ volatile unsigned long lru_clock; /* Server global current LRU time. */
  *
  * This is the meaning of the flags:
  *
- * w: write command (may modify the key space).
- * r: read command  (will never modify the key space).
- * m: may increase memory usage once called. Don't allow if out of memory.
- * a: admin command, like SAVE or SHUTDOWN.
- * p: Pub/Sub related command.
- * f: force replication of this command, regardless of server.dirty.
- * s: command not allowed in scripts.
+ * w: write command (may modify the key space). 写，可能会修改键空间
+ * r: read command  (will never modify the key space). 读，不会修改键空间
+ * m: may increase memory usage once called. Don't allow if out of memory. 第一次调用可能会增加内存，在OOM时不允许调用
+ * a: admin command, like SAVE or SHUTDOWN. 管理员相关命令
+ * p: Pub/Sub related command. 订阅/发布相关命令
+ * f: force replication of this command, regardless of server.dirty. 即使server.dirty也强制复制该命令
+ * s: command not allowed in scripts. 不允许在脚本中执行该命令
  * R: random command. Command is not deterministic, that is, the same command
  *    with the same arguments, with the same key space, may have different
- *    results. For instance SPOP and RANDOMKEY are two random commands.
+ *    results. For instance SPOP and RANDOMKEY are two random commands. 随机性命令
  * S: Sort command output array if called from script, so that the output
  *    is deterministic.
- * l: Allow command while loading the database.
+ * l: Allow command while loading the database. 当加载数据时允许执行该命令
  * t: Allow command while a slave has stale data but is not allowed to
  *    server this data. Normally no command is accepted in this condition
  *    but just a few.
- * M: Do not automatically propagate the command on MONITOR.
+ * M: 不向监视器客户端传播此命令。
  * k: Perform an implicit ASKING for this command, so the command will be
  *    accepted in cluster mode if the slot is marked as 'importing'.
  * F: Fast command: O(1) or O(log(N)) command that should never delay
@@ -771,6 +771,8 @@ int incrementallyRehash(int dbid) {
  * memory pages are copied). The goal of this function is to update the ability
  * for dict.c to resize the hash tables accordingly to the fact we have o not
  * running childs. */
+/* 当有后台子进程进行RDB持久化或者AOF时，关闭rehash操作以防止大量的写时复制；
+ * 当后台子进程结束时，打开持久化 */
 void updateDictResizePolicy(void) {
     if (server.rdb_child_pid == -1 && server.aof_child_pid == -1)
         dictEnableResize();
@@ -1209,6 +1211,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
     /* Start a scheduled AOF rewrite if this was requested by the user while
      * a BGSAVE was in progress. */
+    /* 当用户执行了BGSAVE命令且当前没有进行RDB和AOF持久化时，则进行重写 */
     if (server.rdb_child_pid == -1 && server.aof_child_pid == -1 &&
         server.aof_rewrite_scheduled)
     {
@@ -1253,6 +1256,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     } else {
         /* If there is not a background saving/rewrite in progress check if
          * we have to save/rewrite now. */
+        /* 当后台没有持久化或重写操作时，检查是否需要开始持久化或重写 */
         for (j = 0; j < server.saveparamslen; j++) {
             struct saveparam *sp = server.saveparams+j;
 
@@ -1260,6 +1264,8 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
              * the given amount of seconds, and if the latest bgsave was
              * successful or if, in case of an error, at least
              * CONFIG_BGSAVE_RETRY_DELAY seconds already elapsed. */
+            /* 当上次SAVE成功或失败过去了CONFIG_BGSAVE_RETRY_DELAY秒，
+             * 如果到达了指定时间和变更数，就进行保存。 */
             if (server.dirty >= sp->changes &&
                 server.unixtime-server.lastsave > sp->seconds &&
                 (server.unixtime-server.lastbgsave_try >
@@ -1351,9 +1357,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     return 1000/server.hz;
 }
 
-/* This function gets called every time Redis is entering the
- * main loop of the event driven library, that is, before to sleep
- * for ready file descriptors. */
+/* 在AE事件驱动框架中，在调用多路复用的wait函数前会调用该函数。*/
 void beforeSleep(struct aeEventLoop *eventLoop) {
     UNUSED(eventLoop);
 
@@ -1364,7 +1368,9 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     if (server.cluster_enabled) clusterBeforeSleep();
 
     /* Run a fast expire cycle (the called function will return
-     * ASAP if a fast cycle is not needed). */
+     * ASAP if a fast cycle is not needed).
+     * 执行一个快速的过期键清理
+     * */
     if (server.active_expire_enabled && server.masterhost == NULL)
         activeExpireCycle(ACTIVE_EXPIRE_CYCLE_FAST);
 
@@ -1396,10 +1402,10 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
     if (listLength(server.unblocked_clients))
         processUnblockedClients();
 
-    /* Write the AOF buffer on disk */
+    /* 刷新AOF buffer中的数据到磁盘上 */
     flushAppendOnlyFile(0);
 
-    /* Handle writes with pending output buffers. */
+    /* 处理等待写出回复的客户端 */
     handleClientsWithPendingWrites();
 
     /* Before we are going to sleep, let the threads access the dataset by
@@ -1417,10 +1423,11 @@ void afterSleep(struct aeEventLoop *eventLoop) {
 }
 
 /* =========================== Server initialization ======================== */
-
+/* 初始化shared对象 */
 void createSharedObjects(void) {
     int j;
 
+    /* 服务端回复相关: redisObject<<OBJ_STRING>> */
     shared.crlf = createObject(OBJ_STRING,sdsnew("\r\n"));
     shared.ok = createObject(OBJ_STRING,sdsnew("+OK\r\n"));
     shared.err = createObject(OBJ_STRING,sdsnew("-ERR\r\n"));
@@ -1513,6 +1520,7 @@ void createSharedObjects(void) {
     shared.maxstring = sdsnew("maxstring");
 }
 
+/* 初始化服务器配置 */
 void initServerConfig(void) {
     int j;
 
@@ -1687,9 +1695,11 @@ void initServerConfig(void) {
     /* Command table -- we initiialize it here as it is part of the
      * initial configuration, since command names may be changed via
      * redis.conf using the rename-command directive. */
+    // 创建一个保存commandTableDictType类型的字典，commandTableDictType保存有字典元素的特性函数集，相当于范型
     server.commands = dictCreate(&commandTableDictType,NULL);
     server.orig_commands = dictCreate(&commandTableDictType,NULL);
     populateCommandTable();
+    // 初始化常用命令快速指针
     server.delCommand = lookupCommandByCString("del");
     server.multiCommand = lookupCommandByCString("multi");
     server.lpushCommand = lookupCommandByCString("lpush");
@@ -2033,8 +2043,10 @@ void initServer(void) {
     server.clients_paused = 0;
     server.system_memory_size = zmalloc_get_memory_size();
 
+    /*初始化共享对象:shared对象 */
     createSharedObjects();
     adjustOpenFilesLimit();
+    // 创建AE事件驱动循环框架，setsize为server.maxclients+CONFIG_FDSET_INCR
     server.el = aeCreateEventLoop(server.maxclients+CONFIG_FDSET_INCR);
     if (server.el == NULL) {
         serverLog(LL_WARNING,
@@ -2114,9 +2126,7 @@ void initServer(void) {
     server.aof_last_write_errno = 0;
     server.repl_good_slaves_count = 0;
 
-    /* Create the timer callback, this is our way to process many background
-     * operations incrementally, like clients timeout, eviction of unaccessed
-     * expired keys and so forth. */
+    /* 在AE事件驱动框架中注册serverCron时间事件 */
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         serverPanic("Can't create event loop timers.");
         exit(1);
@@ -2177,6 +2187,7 @@ void initServer(void) {
 
 /* Populates the Redis Command Table starting from the hard coded list
  * we have on top of redis.c file. */
+/* 从硬编码的redisCommandTable中填充到server.commands全局变量中 */
 void populateCommandTable(void) {
     int j;
     int numcommands = sizeof(redisCommandTable)/sizeof(struct redisCommand);
@@ -2297,7 +2308,7 @@ struct redisCommand *lookupCommandOrOriginal(sds name) {
 
 /* Propagate the specified command (in the context of the specified database id)
  * to AOF and Slaves.
- *
+ * 在指定数据库上下文中传播命令到AOF文件和slaves
  * flags are an xor between:
  * + PROPAGATE_NONE (no propagation of command at all)
  * + PROPAGATE_AOF (propagate into the AOF file if is enabled)
@@ -2309,8 +2320,10 @@ struct redisCommand *lookupCommandOrOriginal(sds name) {
 void propagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
                int flags)
 {
+    /* 如果AOF打开了，且PROPAGATE_AOF，写入到AOF文件中 */
     if (server.aof_state != AOF_OFF && flags & PROPAGATE_AOF)
         feedAppendOnlyFile(cmd,dbid,argv,argc);
+    // 如果PROPAGATE_REPL，传播到slaves
     if (flags & PROPAGATE_REPL)
         replicationFeedSlaves(server.slaves,dbid,argv,argc);
 }
@@ -2372,10 +2385,9 @@ void preventCommandReplication(client *c) {
  *
  * The following flags can be passed:
  * CMD_CALL_NONE        No flags.
- * CMD_CALL_SLOWLOG     Check command speed and log in the slow log if needed.
+ * CMD_CALL_SLOWLOG     检查该命令执行时间，条件达到时写入慢日志
  * CMD_CALL_STATS       Populate command stats.
- * CMD_CALL_PROPAGATE_AOF   Append command to AOF if it modified the dataset
- *                          or if the client flags are forcing propagation.
+ * CMD_CALL_PROPAGATE_AOF   如果该命令修改了数据库或者客户端强制，则追加到AOF日志中
  * CMD_CALL_PROPAGATE_REPL  Send command to salves if it modified the dataset
  *                          or if the client flags are forcing propagation.
  * CMD_CALL_PROPAGATE   Alias for PROPAGATE_AOF|PROPAGATE_REPL.
@@ -2412,6 +2424,11 @@ void call(client *c, int flags) {
 
     /* Sent the command to clients in MONITOR mode, only if the commands are
      * not generated from reading an AOF. */
+    /* 当有客户端在监视该服务器时，向监视客户端发送当前处理的命令请求的相关信息
+     * 在下列情况下不发送：
+     * 1. 服务器在加载数据库
+     * 2. 当前命令标志位为CMD_SKIP_MONITOR或CMD_ADMIN管理命令
+     * */
     if (listLength(server.monitors) &&
         !server.loading &&
         !(c->cmd->flags & (CMD_SKIP_MONITOR|CMD_ADMIN)))
@@ -2425,7 +2442,7 @@ void call(client *c, int flags) {
     redisOpArray prev_also_propagate = server.also_propagate;
     redisOpArrayInit(&server.also_propagate);
 
-    /* Call the command. */
+    /* 执行命令并计算出处理时长 */
     dirty = server.dirty;
     start = ustime();
     c->cmd->proc(c);
@@ -2450,6 +2467,7 @@ void call(client *c, int flags) {
 
     /* Log the command into the Slow log if needed, and populate the
      * per-command statistics that we show in INFO commandstats. */
+    /* 如果设置CMD_CALL_SLOWLOG位并且该命令不是EXEC命令，则需要记录慢日志 */
     if (flags & CMD_CALL_SLOWLOG && c->cmd->proc != execCommand) {
         char *latency_event = (c->cmd->flags & CMD_FAST) ?
                               "fast-command" : "command";
@@ -2465,6 +2483,7 @@ void call(client *c, int flags) {
     }
 
     /* Propagate the command into the AOF and replication link */
+    /* 传播命令到AOF文件和从服务器 */
     if (flags & CMD_CALL_PROPAGATE &&
         (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP)
     {
@@ -2472,16 +2491,19 @@ void call(client *c, int flags) {
 
         /* Check if the command operated changes in the data set. If so
          * set for replication / AOF propagation. */
+        /* 检查该命令是否修改了数据集，如果是，则进行传播 */
         if (dirty) propagate_flags |= (PROPAGATE_AOF|PROPAGATE_REPL);
 
         /* If the client forced AOF / replication of the command, set
          * the flags regardless of the command effects on the data set. */
+        /* 如果客户端设置了强制强制服务，则也需要进行传播 */
         if (c->flags & CLIENT_FORCE_REPL) propagate_flags |= PROPAGATE_REPL;
         if (c->flags & CLIENT_FORCE_AOF) propagate_flags |= PROPAGATE_AOF;
 
         /* However prevent AOF / replication propagation if the command
          * implementations called preventCommandPropagation() or similar,
          * or if we don't have the call() flags to do so. */
+        /* 然而如果该命令实现了preventCommandPropagation()之类的方法，或者没有call()标志，我们不记性传播 */
         if (c->flags & CLIENT_PREVENT_REPL_PROP ||
             !(flags & CMD_CALL_PROPAGATE_REPL))
                 propagate_flags &= ~PROPAGATE_REPL;
@@ -2492,6 +2514,8 @@ void call(client *c, int flags) {
         /* Call propagate() only if at least one of AOF / replication
          * propagation is needed. Note that modules commands handle replication
          * in an explicit way, so we never replicate them automatically. */
+        /* 仅当需要进行传播并且该命令不是Module命令时，才进行复制。
+         * Module命令以一种显式的方式进行复制，所以我们不会进行自动服复制。 */
         if (propagate_flags != PROPAGATE_NONE && !(c->cmd->flags & CMD_MODULE))
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
@@ -2534,11 +2558,14 @@ void call(client *c, int flags) {
  * If C_OK is returned the client is still alive and valid and
  * other operations can be performed by the caller. Otherwise
  * if C_ERR is returned the client was destroyed (i.e. after QUIT). */
+/* 当整个命令是准备好了的时候，将会执行该函数，命令参数及其数量存放在argv和argc字段中 */
+/* 当命令合法，操作被执行且客户端仍处于连接状态时返回OK，否则返回ERR */
 int processCommand(client *c) {
     /* The QUIT command is handled separately. Normal command procs will
      * go through checking for replication and QUIT will cause trouble
      * when FORCE_REPLICATION is enabled and would be implemented in
      * a regular command proc. */
+    // QUIT命令需要特殊处理
     if (!strcasecmp(c->argv[0]->ptr,"quit")) {
         addReply(c,shared.ok);
         c->flags |= CLIENT_CLOSE_AFTER_REPLY;
@@ -2547,11 +2574,14 @@ int processCommand(client *c) {
 
     /* Now lookup the command and check ASAP about trivial error conditions
      * such as wrong arity, bad command name and so forth. */
+    /* 从server.commands字典中查找出命令对象redisCommand */
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
-    if (!c->cmd) {
+    if (!c->cmd) {              // 当没有找到对应的命令时，返回一个错误回复
+        /* 如果客户端处于事务中，添加CLIENT_DIRTY_EXEC标志位，使得后续的EXEC指令失败 */
         flagTransaction(c);
         sds args = sdsempty();
         int i;
+        // 错误回复格式：-ERR unknown command 'foobar', with args beginning with: aaa bbb
         for (i=1; i < c->argc && sdslen(args) < 128; i++)
             args = sdscatprintf(args, "`%.*s`, ", 128-(int)sdslen(args), (char*)c->argv[i]->ptr);
         addReplyErrorFormat(c,"unknown command `%s`, with args beginning with: %s",
@@ -2560,16 +2590,24 @@ int processCommand(client *c) {
         return C_OK;
     } else if ((c->cmd->arity > 0 && c->cmd->arity != c->argc) ||
                (c->argc < -c->cmd->arity)) {
+        /* 检查参数是否合法:
+         * 1. 当命令参数固定(arity>0）时，需要客户端发送过来的参数个数==命令参数个数
+         * 2. 当命令参数不固定(arity<=0)时，需要客户端参数个数>=命令参数个数(总是成立?) todo
+         * 否则，对事务状态标记添加CLIENT_DIRTY_EXEC标志位，使得后续的EXEC指令失败
+         * */
         flagTransaction(c);
+        // 发送错误回复: -ERROR wrong number of arguments for 'set' command
         addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
             c->cmd->name);
         return C_OK;
     }
 
-    /* Check if the user is authenticated */
+    /* 检查是否进行了登陆验证 */
     if (server.requirepass && !c->authenticated && c->cmd->proc != authCommand)
     {
+        /* 如果在事务中，添加失败标记 */
         flagTransaction(c);
+        // 发送错误回复：-NOAUTH Authentication required.
         addReply(c,shared.noautherr);
         return C_OK;
     }
@@ -2601,11 +2639,11 @@ int processCommand(client *c) {
     }
 
     /* Handle the maxmemory directive.
-     *
+     * 如果服务器开启了最大内存限制，处理内存达到最大相关的指令
      * First we try to free some memory if possible (if there are volatile
      * keys in the dataset). If there are not the only thing we can do
      * is returning an error.
-     *
+     * 如果可以的话，首先我们尝试释放一些内存(如果存在一些易变的键在数据集中)，如果内存回收失败，我们将会返回一个ERR
      * Note that we do not want to reclaim memory if we are here re-entering
      * the event loop since there is a busy Lua script running in timeout
      * condition, to avoid mixing the propagation of scripts with the propagation
@@ -2627,6 +2665,7 @@ int processCommand(client *c) {
 
     /* Don't accept write commands if there are problems persisting on disk
      * and if this is a master instance. */
+    /*  如果上一次执行持久化出错, 并且当前服务器是主服务器，我们不接受写命令 */
     int deny_write_type = writeCommandsDeniedByDiskError();
     if (deny_write_type != DISK_ERROR_TYPE_NONE &&
         server.masterhost == NULL &&
@@ -2713,7 +2752,7 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* Exec the command */
+    /* 如果当前redisClient处于事务状态，并且命令不是在事务中可以立即执行的命令，则进行入队操作，否则执行客户端命令 */
     if (c->flags & CLIENT_MULTI &&
         c->cmd->proc != execCommand && c->cmd->proc != discardCommand &&
         c->cmd->proc != multiCommand && c->cmd->proc != watchCommand)

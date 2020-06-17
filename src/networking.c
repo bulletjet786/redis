@@ -167,6 +167,7 @@ client *createClient(int fd) {
  * handleClientsWithPendingWrites() function).
  * If we fail and there is more data to write, compared to what the socket
  * buffers can hold, then we'll really install the handler. */
+/* 将该客户端置CLIENT_PENDING_WRITE位，然后将其放入到clients_pending_write队列中 */
 void clientInstallWriteHandler(client *c) {
     /* Schedule the client to write the output buffers to the socket only
      * if not already done and, for slaves, if the slave can actually receive
@@ -181,22 +182,28 @@ void clientInstallWriteHandler(client *c) {
          * loop, we can try to directly write to the client sockets avoiding
          * a system call. We'll only really install the write handler if
          * we'll not be able to write the whole reply at once. */
+        /* 此处我们用置位和推入链表来代替直直接安装命令回复处理器。
+         * todo: 原因
+         * */
         c->flags |= CLIENT_PENDING_WRITE;
         listAddNodeHead(server.clients_pending_write,c);
     }
 }
 
-/* This function is called every time we are going to transmit new data
- * to the client. The behavior is the following:
+/* 当我们每次想往客户端传输数据时，这个函数都会被调用.
  *
- * If the client should receive new data (normal clients will) the function
- * returns C_OK, and make sure to install the write handler in our event
- * loop so that when the socket is writable new data gets written.
+ * 如果客户端(正常的客户端)应该接受新的数据,这个函数将会返回C_OK,并且确保当socket可写时
+ * 在AE事件循环中安装好命令回复处理器.
  *
+ * 当客户端不应该接收一个数据时,比如fake客户端(比如用来在内存中做AOF的),作为主服务器
+ * 或者安装命令回复处理器失败时,将会返回C_ERR.
  * If the client should not receive new data, because it is a fake client
  * (used to load AOF in memory), a master or because the setup of the write
  * handler failed, the function returns C_ERR.
  *
+ * 这个函数在以下两种情况下不会安装命令回复处理器就回复C_OK：
+ * 1) 当命令回复处理器已经被安装了；
+ * 2) 当客户端是从服务器但是不在线，我们想要加速写，所以不确保会发送数据.
  * The function may return C_OK without actually installing the write
  * event handler in the following cases:
  *
@@ -235,6 +242,7 @@ int prepareClientToWrite(client *c) {
  * Low level functions to add more data to output buffers.
  * -------------------------------------------------------------------------- */
 
+/* 将回复写入静态缓冲区c->buf中，成功写入则返回C_OK，否则返回C_ERR */
 int _addReplyToBuffer(client *c, const char *s, size_t len) {
     size_t available = sizeof(c->buf)-c->bufpos;
 
@@ -252,6 +260,7 @@ int _addReplyToBuffer(client *c, const char *s, size_t len) {
     return C_OK;
 }
 
+/* 将回复写入动态缓冲链表c->reply中 */
 void _addReplyStringToList(client *c, const char *s, size_t len) {
     if (c->flags & CLIENT_CLOSE_AFTER_REPLY) return;
 
@@ -262,10 +271,9 @@ void _addReplyStringToList(client *c, const char *s, size_t len) {
      * addDeferredMultiBulkLength() is used, it sets a dummy node to NULL just
      * fo fill it later, when the size of the bulk length is set. */
 
-    /* Append to tail string when possible. */
+    /* 如果最后一个Node有剩余空间，则先写满最后一个Node */
     if (tail) {
-        /* Copy the part we can fit into the tail, and leave the rest for a
-         * new node */
+        /* 填充满最后一个空间 */
         size_t avail = tail->size - tail->used;
         size_t copy = avail >= len? len: avail;
         memcpy(tail->buf + tail->used, s, copy);
@@ -273,6 +281,7 @@ void _addReplyStringToList(client *c, const char *s, size_t len) {
         s += copy;
         len -= copy;
     }
+    /* 如果还有剩余，则开辟一个新的节点，节点大小为max(16K,len)，然后将剩下的数据写入新的节点中 */
     if (len) {
         /* Create a new node, make sure it is allocated to at
          * least PROTO_REPLY_CHUNK_BYTES */
@@ -294,6 +303,7 @@ void _addReplyStringToList(client *c, const char *s, size_t len) {
  * -------------------------------------------------------------------------- */
 
 /* Add the object 'obj' string representation to the client output buffer. */
+/* 把robj对象的字符串表示写入到客户端的output buffer */
 void addReply(client *c, robj *obj) {
     if (prepareClientToWrite(c) != C_OK) return;
 
@@ -334,8 +344,10 @@ void addReplySds(client *c, sds s) {
  * if not needed. The object will only be created by calling
  * _addReplyStringToList() if we fail to extend the existing tail object
  * in the list of objects. */
+/*  */
 void addReplyString(client *c, const char *s, size_t len) {
     if (prepareClientToWrite(c) != C_OK) return;
+    /* 首先尝试写入到c->buf静态缓冲区，如果失败则写入动态缓冲链表c->reply */
     if (_addReplyToBuffer(c,s,len) != C_OK)
         _addReplyStringToList(c,s,len);
 }
@@ -521,6 +533,7 @@ void addReplyLongLongWithPrefix(client *c, long long ll, char prefix) {
     addReplyString(c,buf,len+3);
 }
 
+/* 添加一个整形回复 :100\r\n */
 void addReplyLongLong(client *c, long long ll) {
     if (ll == 0)
         addReply(c,shared.czero);
@@ -646,8 +659,7 @@ void copyClientOutputBuffer(client *dst, client *src) {
     dst->reply_bytes = src->reply_bytes;
 }
 
-/* Return true if the specified client has pending reply buffers to write to
- * the socket. */
+/* 如果输出缓冲区中仍然有数据则返回True */
 int clientHasPendingReplies(client *c) {
     return c->bufpos || listLength(c->reply);
 }
@@ -930,6 +942,7 @@ void freeClient(client *c) {
  * This function is useful when we need to terminate a client but we are in
  * a context where calling freeClient() is not possible, because the client
  * should be valid for the continuation of the flow of the program. */
+/* 将c->flags置位CLIENT_CLOSE_ASAP，并把该client加入到clients_to_close链表中，从而异步的关闭客户端。 */
 void freeClientAsync(client *c) {
     if (c->flags & CLIENT_CLOSE_ASAP || c->flags & CLIENT_LUA) return;
     c->flags |= CLIENT_CLOSE_ASAP;
@@ -958,28 +971,35 @@ client *lookupClientByID(uint64_t id) {
 
 /* Write data in output buffers to client. Return C_OK if the client
  * is still valid after the call, C_ERR if it was freed. */
+/* 将输出缓冲区中的数据写入到客户端。
+ * 当写入后缓冲区中不再有数据则返回C_ERR，否则返回C_OK
+ * */
 int writeToClient(int fd, client *c, int handler_installed) {
     ssize_t nwritten = 0, totwritten = 0;
     size_t objlen;
     clientReplyBlock *o;
 
+    /* 只要输出缓冲区中仍然有数据 */
     while(clientHasPendingReplies(c)) {
+        /* 如果静态缓冲区内有数据，则发送静态缓冲区，静态缓冲区发送完后，发送动态缓冲区数据 */
         if (c->bufpos > 0) {
             nwritten = write(fd,c->buf+c->sentlen,c->bufpos-c->sentlen);
+            /* 如果无法再写入到TCP发送缓冲区，则跳出同步发送循环 */
             if (nwritten <= 0) break;
             c->sentlen += nwritten;
             totwritten += nwritten;
 
-            /* If the buffer was sent, set bufpos to zero to continue with
-             * the remainder of the reply. */
+            /* 如果静态缓冲区数据被发送完，则需要重置静态缓冲区状态 */
             if ((int)c->sentlen == c->bufpos) {
                 c->bufpos = 0;
                 c->sentlen = 0;
             }
         } else {
+            /* 从动态缓冲区链表中取出一个缓冲区Node */
             o = listNodeValue(listFirst(c->reply));
             objlen = o->used;
 
+            /* 如果当前节点没有数据要发送，则删除该节点 */
             if (objlen == 0) {
                 c->reply_bytes -= o->size;
                 listDelNode(c->reply,listFirst(c->reply));
@@ -987,17 +1007,17 @@ int writeToClient(int fd, client *c, int handler_installed) {
             }
 
             nwritten = write(fd, o->buf + c->sentlen, objlen - c->sentlen);
+            /* 如果无法再写入到TCP发送缓冲区，则跳出同步发送循环 */
             if (nwritten <= 0) break;
             c->sentlen += nwritten;
             totwritten += nwritten;
 
-            /* If we fully sent the object on head go to the next one */
+            /* 如果当前Node的数据被发送完，则删除该节点，处理下一个节点 */
             if (c->sentlen == objlen) {
                 c->reply_bytes -= o->size;
                 listDelNode(c->reply,listFirst(c->reply));
                 c->sentlen = 0;
-                /* If there are no longer objects in the list, we expect
-                 * the count of reply bytes to be exactly zero. */
+                /* 断言：动态缓冲区链表长度为0时，应该有c->reply_bytes == 0 */
                 if (listLength(c->reply) == 0)
                     serverAssert(c->reply_bytes == 0);
             }
@@ -1007,10 +1027,12 @@ int writeToClient(int fd, client *c, int handler_installed) {
          * other clients as well, even if a very large request comes from
          * super fast link that is always able to accept data (in real world
          * scenario think about 'KEYS *' against the loopback interface).
-         *
+         * 在一个单线程的服务器中，一次性发送过多的数据给客户端不是一个很好的注意，
+         * 这可能使得另一个很快的客户端一直收不到数据，因为线程被占用了。为了防止这种情况，
+         * 我们设置一次性最大可以发送NET_MAX_WRITES_PER_EVENT字节数据，超过则跳出循环。
          * However if we are over the maxmemory limit we ignore that and
          * just deliver as much data as it is possible to deliver.
-         *
+         * todo: maxmemory
          * Moreover, we also send as much as possible if the client is
          * a slave (otherwise, on high-speed traffic, the replication
          * buffer will grow indefinitely) */
@@ -1019,6 +1041,7 @@ int writeToClient(int fd, client *c, int handler_installed) {
              zmalloc_used_memory() < server.maxmemory) &&
             !(c->flags & CLIENT_SLAVE)) break;
     }
+    /* 更新已经发送的字节数 */
     server.stat_net_output_bytes += totwritten;
     if (nwritten == -1) {
         if (errno == EAGAIN) {
@@ -1030,6 +1053,7 @@ int writeToClient(int fd, client *c, int handler_installed) {
             return C_ERR;
         }
     }
+    /* 如果不是master，则设置最后一次交互的事件，todo：干嘛用的 */
     if (totwritten > 0) {
         /* For clients representing masters we don't count sending data
          * as an interaction, since we always send REPLCONF ACK commands
@@ -1037,6 +1061,7 @@ int writeToClient(int fd, client *c, int handler_installed) {
          * We just rely on data / pings received for timeout detection. */
         if (!(c->flags & CLIENT_MASTER)) c->lastinteraction = server.unixtime;
     }
+    /* 如果当前缓冲区中没有数据，则需要重置缓冲区状态位并卸载命令回复处理器 */
     if (!clientHasPendingReplies(c)) {
         c->sentlen = 0;
         if (handler_installed) aeDeleteFileEvent(server.el,c->fd,AE_WRITABLE);
@@ -1061,6 +1086,7 @@ void sendReplyToClient(aeEventLoop *el, int fd, void *privdata, int mask) {
  * we can just write the replies to the client output buffer without any
  * need to use a syscall in order to install the writable event handler,
  * get it called, and so forth. */
+/* 该事件在进入事件循环之前被调用，我们希望能够直接写入到客户端而不是通过安装命令回复处理器 */
 int handleClientsWithPendingWrites(void) {
     listIter li;
     listNode *ln;
@@ -1072,11 +1098,10 @@ int handleClientsWithPendingWrites(void) {
         c->flags &= ~CLIENT_PENDING_WRITE;
         listDelNode(server.clients_pending_write,ln);
 
-        /* Try to write buffers to the client socket. */
+        /* 如果同步写可以将数据写完，则不必安装命令回复处理器，直接处理下一个节点 */
         if (writeToClient(c->fd,c,0) == C_ERR) continue;
 
-        /* If after the synchronous writes above we still have data to
-         * output to the client, we need to install the writable handler. */
+        /* 如果同步写之后仍有数据残留在缓冲区中，则安装命令回复处理器 */
         if (clientHasPendingReplies(c)) {
             int ae_flags = AE_WRITABLE;
             /* For the fsync=always policy, we want that a given FD is never
@@ -1265,13 +1290,14 @@ int processMultibulkBuffer(client *c) {
     int ok;
     long long ll;
 
+    // 如果当前命令未读取的命令块为0，表示即将进行一个新的命令解析
     if (c->multibulklen == 0) {
         /* The client should have been reset */
         serverAssertWithInfo(c,NULL,c->argc == 0);
 
         /* Multi bulk length cannot be read without a \r\n */
-        newline = strchr(c->querybuf+c->qb_pos,'\r');
-        if (newline == NULL) {
+        newline = strchr(c->querybuf+c->qb_pos,'\r');   /* 返回第一次出现\r\n的位置的指针 */
+        if (newline == NULL) {  /* 找不到\r\n， 返回错误，表示需要读取更多的数据来查找 */
             if (sdslen(c->querybuf)-c->qb_pos > PROTO_INLINE_MAX_SIZE) {
                 addReplyError(c,"Protocol error: too big mbulk count string");
                 setProtocolError("too big mbulk count string",c);
@@ -1283,32 +1309,38 @@ int processMultibulkBuffer(client *c) {
         if (newline-(c->querybuf+c->qb_pos) > (ssize_t)(sdslen(c->querybuf)-c->qb_pos-2))
             return C_ERR;
 
+        /**
+         * 请求命令：SET mykey myvalue
+         * RESP格式：*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$7\r\nmyvalue\r\n
+         */
+
         /* We know for sure there is a whole line since newline != NULL,
          * so go ahead and find out the multi bulk length. */
-        serverAssertWithInfo(c,NULL,c->querybuf[c->qb_pos] == '*');
-        ok = string2ll(c->querybuf+1+c->qb_pos,newline-(c->querybuf+1+c->qb_pos),&ll);
-        if (!ok || ll > 1024*1024) {
+        serverAssertWithInfo(c,NULL,c->querybuf[c->qb_pos] == '*'); // 断言c->qb_bos指向*
+        ok = string2ll(c->querybuf+1+c->qb_pos,newline-(c->querybuf+1+c->qb_pos),&ll);  // 将*和\r\n中间的3解析到ll中，成功返回1
+        if (!ok || ll > 1024*1024) {    // 如果解析失败，或者multibulk length过长，返回失败
             addReplyError(c,"Protocol error: invalid multibulk length");
             setProtocolError("invalid mbulk count",c);
             return C_ERR;
         }
 
-        c->qb_pos = (newline-c->querybuf)+2;
+        c->qb_pos = (newline-c->querybuf)+2;    // c->qb_pos跳过\r\n
 
         if (ll <= 0) return C_OK;
 
-        c->multibulklen = ll;
+        c->multibulklen = ll;   // 设置当前命令未读取的块数
 
         /* Setup argv array on client structure */
         if (c->argv) zfree(c->argv);
-        c->argv = zmalloc(sizeof(robj*)*c->multibulklen);
+        c->argv = zmalloc(sizeof(robj*)*c->multibulklen);       // 申请保存客户端命令的空间
     }
 
+    // 当前命令的待解析块数不为0，则进行解析剩余的命令块
     serverAssertWithInfo(c,NULL,c->multibulklen > 0);
     while(c->multibulklen) {
-        /* Read bulk length if unknown */
+        /* 如果命令块长度未知，则需要读取命令块长度 */
         if (c->bulklen == -1) {
-            newline = strchr(c->querybuf+c->qb_pos,'\r');
+            newline = strchr(c->querybuf+c->qb_pos,'\r');   // 查找下一个\r\n，在$与\r\n之间的就是命令块长度
             if (newline == NULL) {
                 if (sdslen(c->querybuf)-c->qb_pos > PROTO_INLINE_MAX_SIZE) {
                     addReplyError(c,
@@ -1331,15 +1363,15 @@ int processMultibulkBuffer(client *c) {
                 return C_ERR;
             }
 
-            ok = string2ll(c->querybuf+c->qb_pos+1,newline-(c->querybuf+c->qb_pos+1),&ll);
+            ok = string2ll(c->querybuf+c->qb_pos+1,newline-(c->querybuf+c->qb_pos+1),&ll);  // 将$与\r\n之间的命令块长度写入ll
             if (!ok || ll < 0 || ll > server.proto_max_bulk_len) {
                 addReplyError(c,"Protocol error: invalid bulk length");
                 setProtocolError("invalid bulk length",c);
                 return C_ERR;
             }
 
-            c->qb_pos = newline-c->querybuf+2;
-            if (ll >= PROTO_MBULK_BIG_ARG) {
+            c->qb_pos = newline-c->querybuf+2;     // 跳过\r\n
+            if (ll >= PROTO_MBULK_BIG_ARG) {       // 优化措施，非关键路径
                 /* If we are going to read a large object from network
                  * try to make it likely that it will start at c->querybuf
                  * boundary so that we can optimize object creation
@@ -1360,8 +1392,9 @@ int processMultibulkBuffer(client *c) {
             c->bulklen = ll;
         }
 
+        // 当命令块长度获取成功时，需要获取命令块内容
         /* Read bulk argument */
-        if (sdslen(c->querybuf)-c->qb_pos < (size_t)(c->bulklen+2)) {
+        if (sdslen(c->querybuf)-c->qb_pos < (size_t)(c->bulklen+2)) {       // 此时数据不足，跳出循环，下次处理
             /* Not enough data (+2 == trailing \r\n) */
             break;
         } else {
@@ -1379,20 +1412,21 @@ int processMultibulkBuffer(client *c) {
                 c->querybuf = sdsnewlen(SDS_NOINIT,c->bulklen+2);
                 sdsclear(c->querybuf);
             } else {
+                // 从当前位置读取块长度的字节，就是命令块内容，写入c->argv数组，内容是一个保存着sds结构的redisObject
                 c->argv[c->argc++] =
                     createStringObject(c->querybuf+c->qb_pos,c->bulklen);
-                c->qb_pos += c->bulklen+2;
+                c->qb_pos += c->bulklen+2;      // 跳过\r\n
             }
-            c->bulklen = -1;
-            c->multibulklen--;
+            c->bulklen = -1;        // 将当前命令块设置为-1，下次循环中将获取新的块长度
+            c->multibulklen--;      // 带读取命定块数递减
         }
     }
 
     /* We're done when c->multibulk == 0 */
-    if (c->multibulklen == 0) return C_OK;
+    if (c->multibulklen == 0) return C_OK;      // 命令全部读取完成，则返回OK
 
     /* Still not ready to process the command */
-    return C_ERR;
+    return C_ERR;       // 命令未全部读取，则返回ERR
 }
 
 /* This function is called every time, in the client structure 'c', there is
@@ -1424,6 +1458,7 @@ void processInputBuffer(client *c) {
         if (c->flags & (CLIENT_CLOSE_AFTER_REPLY|CLIENT_CLOSE_ASAP)) break;
 
         /* Determine request type when unknown. */
+        /* 如果当前位置以*开头，则RESP格式命令，否则为Inline格式命令 */
         if (!c->reqtype) {
             if (c->querybuf[c->qb_pos] == '*') {
                 c->reqtype = PROTO_REQ_MULTIBULK;
@@ -1432,18 +1467,21 @@ void processInputBuffer(client *c) {
             }
         }
 
+        /* 如果是Inline格式命令，则调用processInlineBuffer处理，该命令格式主要用于telnet
+         * 如果是RESP格式命令，则调用processMultibulkBuffer处理，该命令格式主要用于一般客户端
+         * */
         if (c->reqtype == PROTO_REQ_INLINE) {
             if (processInlineBuffer(c) != C_OK) break;
         } else if (c->reqtype == PROTO_REQ_MULTIBULK) {
-            if (processMultibulkBuffer(c) != C_OK) break;
+            if (processMultibulkBuffer(c) != C_OK) break;       // 如果命令未全部读取完成，则返回ERR，下次继续进行处理
         } else {
             serverPanic("Unknown request type");
         }
 
         /* Multibulk processing could see a <= 0 length. */
-        if (c->argc == 0) {
+        if (c->argc == 0) {     // 当命令参数数量为0，则重置客户端
             resetClient(c);
-        } else {
+        } else {        // 否则执行该命令
             /* Only reset the client when the command was executed. */
             if (processCommand(c) == C_OK) {
                 if (c->flags & CLIENT_MASTER && !(c->flags & CLIENT_MULTI)) {
@@ -1479,9 +1517,10 @@ void processInputBuffer(client *c) {
  * is flagged as master. Usually you want to call this instead of the
  * raw processInputBuffer(). */
 void processInputBufferAndReplicate(client *c) {
+    // 如果该服务器是Slave，处理缓冲区中的命令
     if (!(c->flags & CLIENT_MASTER)) {
         processInputBuffer(c);
-    } else {
+    } else {       // 如果该服务器是Master，则不仅需要处理缓冲区中的命令，还需要将命令复制到Slave上
         size_t prev_offset = c->reploff;
         processInputBuffer(c);
         size_t applied = c->reploff - prev_offset;
@@ -1493,6 +1532,7 @@ void processInputBufferAndReplicate(client *c) {
     }
 }
 
+/* 从TCP缓冲区中读取数据，写入到client->querybuf中 */
 void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     client *c = (client*) privdata;
     int nread, readlen;
@@ -1519,21 +1559,21 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     qblen = sdslen(c->querybuf);
     if (c->querybuf_peak < qblen) c->querybuf_peak = qblen;
-    c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);
+    c->querybuf = sdsMakeRoomFor(c->querybuf, readlen);     // 扩大sds的内部缓冲区使得可以多容纳readlen字节数据
     nread = read(fd, c->querybuf+qblen, readlen);
-    if (nread == -1) {
-        if (errno == EAGAIN) {
+    if (nread == -1) {      // 读取出错
+        if (errno == EAGAIN) {      // TCP缓冲区暂时无数据，返回下次继续读取
             return;
         } else {
             serverLog(LL_VERBOSE, "Reading from client: %s",strerror(errno));
-            freeClient(c);
+            freeClient(c);      // 真的读取出错，关闭客户端
             return;
         }
-    } else if (nread == 0) {
+    } else if (nread == 0) {        // 客户端关闭
         serverLog(LL_VERBOSE, "Client closed connection");
         freeClient(c);
         return;
-    } else if (c->flags & CLIENT_MASTER) {
+    } else if (c->flags & CLIENT_MASTER) {      // 如果该服务器为Master
         /* Append the query buffer to the pending (not applied) buffer
          * of the master. We'll use this buffer later in order to have a
          * copy of the string applied by the last command executed. */
@@ -1545,7 +1585,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
     c->lastinteraction = server.unixtime;
     if (c->flags & CLIENT_MASTER) c->read_reploff += nread;
     server.stat_net_input_bytes += nread;
-    if (sdslen(c->querybuf) > server.client_max_querybuf_len) {
+    if (sdslen(c->querybuf) > server.client_max_querybuf_len) {             // 如果查询缓冲区太长，则释放客户端连接
         sds ci = catClientInfoString(sdsempty(),c), bytes = sdsempty();
 
         bytes = sdscatrepr(bytes,c->querybuf,64);
@@ -1562,6 +1602,7 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
      * was actually applied to the master state: this quantity, and its
      * corresponding part of the replication stream, will be propagated to
      * the sub-slaves and to the replication backlog. */
+    /* 处理输入缓冲区中的数据，并且进行复制操作 */
     processInputBufferAndReplicate(c);
 }
 
@@ -2019,7 +2060,7 @@ unsigned long getClientOutputBufferMemoryUsage(client *c) {
 
 /* Get the class of a client, used in order to enforce limits to different
  * classes of clients.
- *
+ * 获取客户端类型
  * The function will return one of the following:
  * CLIENT_TYPE_NORMAL -> Normal client
  * CLIENT_TYPE_SLAVE  -> Slave or client executing MONITOR command
@@ -2053,14 +2094,10 @@ char *getClientTypeName(int class) {
     }
 }
 
-/* The function checks if the client reached output buffer soft or hard
- * limit, and also update the state needed to check the soft limit as
- * a side effect.
- *
- * Return value: non-zero if the client reached the soft or the hard limit.
- *               Otherwise zero is returned. */
+/* 如果输出缓冲区内存使用达到了硬性限制或者达到了软性限制一定时间，则返回1，否则返回0 */
 int checkClientOutputBufferLimits(client *c) {
     int soft = 0, hard = 0, class;
+    /* 获取当前缓冲区使用的总内存大小 */
     unsigned long used_mem = getClientOutputBufferMemoryUsage(c);
 
     class = getClientType(c);
@@ -2077,6 +2114,12 @@ int checkClientOutputBufferLimits(client *c) {
 
     /* We need to check if the soft limit is reached continuously for the
      * specified amount of seconds. */
+    /* 当前内存达到了软限制：
+     *      1. 第一次达到，则记录时间，置0
+     *      2. 非第一次达到，则计算时间，未超出时间限制则置0
+     * 当前内存未达到软限制：
+     *      需要将时间点置0（有可能上次达到，这次恢复）
+     * */
     if (soft) {
         if (c->obuf_soft_limit_reached_time == 0) {
             c->obuf_soft_limit_reached_time = server.unixtime;
@@ -2100,13 +2143,16 @@ int checkClientOutputBufferLimits(client *c) {
 /* Asynchronously close a client if soft or hard limit is reached on the
  * output buffer size. The caller can check if the client will be closed
  * checking if the client CLIENT_CLOSE_ASAP flag is set.
- *
+ * 检查客户端是否达到输出缓冲区软、硬限制，如果是，则异步的关闭客户端，
+ * 在下一轮的serverCron中将真正的进行客户端关闭。
+ * 异步的原因是：该函数可能在调用的时候处于一个不安全的状态，需要将其关闭时机调整到安全点。
  * Note: we need to close the client asynchronously because this function is
  * called from contexts where the client can't be freed safely, i.e. from the
  * lower level functions pushing data inside the client output buffers. */
 void asyncCloseClientOnOutputBufferLimitReached(client *c) {
     serverAssert(c->reply_bytes < SIZE_MAX-(1024*64));
     if (c->reply_bytes == 0 || c->flags & CLIENT_CLOSE_ASAP) return;
+    // 如果软硬内存限制超出了，则进行异步关闭
     if (checkClientOutputBufferLimits(c)) {
         sds client = catClientInfoString(sdsempty(),c);
 

@@ -33,9 +33,11 @@
 
 typedef struct aeApiState {
     int epfd;
+    /* 动态数组：长度为eventLoop->setsize，其中events[fd]为文件描述符fd所关联的epoll_event结构体*/
     struct epoll_event *events;
 } aeApiState;
 
+// 初始化Epoll结构体
 static int aeApiCreate(aeEventLoop *eventLoop) {
     aeApiState *state = zmalloc(sizeof(aeApiState));
 
@@ -70,6 +72,7 @@ static void aeApiFree(aeEventLoop *eventLoop) {
     zfree(state);
 }
 
+/* 向epoll中添加一个文件事件 */
 static int aeApiAddEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeApiState *state = eventLoop->apidata;
     struct epoll_event ee = {0}; /* avoid valgrind warning */
@@ -105,6 +108,7 @@ static void aeApiDelEvent(aeEventLoop *eventLoop, int fd, int delmask) {
     }
 }
 
+/* 在epoll上wait，wait结束后将所有就绪的文件事件填入fired就绪数组中 */
 static int aeApiPoll(aeEventLoop *eventLoop, struct timeval *tvp) {
     aeApiState *state = eventLoop->apidata;
     int retval, numevents = 0;

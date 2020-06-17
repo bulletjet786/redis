@@ -1307,6 +1307,7 @@ int rdbSaveBackground(char *filename, rdbSaveInfo *rsi) {
             }
 
             server.child_info_data.cow_size = private_dirty;
+            /* 将私有驻留内存数发送给父进程 */
             sendChildInfo(CHILD_INFO_TYPE_RDB);
         }
         exitFromChild((retval == C_OK) ? 0 : 1);
@@ -1326,6 +1327,7 @@ int rdbSaveBackground(char *filename, rdbSaveInfo *rsi) {
         server.rdb_save_time_start = time(NULL);
         server.rdb_child_pid = childpid;
         server.rdb_child_type = RDB_CHILD_TYPE_DISK;
+        /* 关闭rehash以防止大量写时复制 */
         updateDictResizePolicy();
         return C_OK;
     }
@@ -2403,6 +2405,7 @@ void bgsaveCommand(client *c) {
 
     /* The SCHEDULE option changes the behavior of BGSAVE when an AOF rewrite
      * is in progress. Instead of returning an error a BGSAVE gets scheduled. */
+    /* 在后台正在进行AOF重写时，SCHEDULE选项将会在之后记性调度而不是直接返回一个错误。 */
     if (c->argc > 1) {
         if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"schedule")) {
             schedule = 1;
@@ -2419,6 +2422,7 @@ void bgsaveCommand(client *c) {
         addReplyError(c,"Background save already in progress");
     } else if (server.aof_child_pid != -1) {
         if (schedule) {
+            /* 将会在AOF重写完成后进行BGSAVE操作，为了防止AOF重写和RDB持久化时同时进行产生大量的I/O */
             server.rdb_bgsave_scheduled = 1;
             addReplyStatus(c,"Background saving scheduled");
         } else {
