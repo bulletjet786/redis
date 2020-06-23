@@ -37,6 +37,9 @@
 /* Check the length of a number of objects to see if we need to convert a
  * ziplist to a real hash. Note that we only check string encoded objects
  * as their string length can be queried in constant time. */
+/* 检查一系列的对象，判断是否需要从ziplist转化成hashtable。我们仅仅检查字符串对象和
+ * 他的长度，这个检查可以在常量时间内完成。
+ * */
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
     int i;
 
@@ -181,6 +184,8 @@ int hashTypeExists(robj *o, sds field) {
 /* Add a new field, overwrite the old with the new value if it already exists.
  * Return 0 on insert and 1 on update.
  *
+ * 增加一个新域，如已存在则替换，返回0表示插入，1表示更新。
+ *
  * By default, the key and value SDS strings are copied if needed, so the
  * caller retains ownership of the strings passed. However this behavior
  * can be effected by passing appropriate flags (possibly bitwise OR-ed):
@@ -195,6 +200,12 @@ int hashTypeExists(robj *o, sds field) {
  * HASH_SET_COPY corresponds to no flags passed, and means the default
  * semantics of copying the values if needed.
  *
+ * 默认情况下，key和value的sds字符串将会被复制，所以调用方将会保留对sds字符串的所有权。
+ * 然而，这个行为可以通过flags字段改变。
+ * HASH_SET_TAKE_FIELD -- field的所有权将会被传递给这个函数
+ * HASH_SET_TAKE_VALUE -- value的所有权将会被传递给这个函数
+ * 当这些flags被调用方使用的时候，意味着调用方不需要释放sds字符串。是使用这个sds字符串
+ * 去创建一个新的entry还是直接释放掉取决于这个函数。
  */
 #define HASH_SET_TAKE_FIELD (1<<0)
 #define HASH_SET_TAKE_VALUE (1<<1)
@@ -237,6 +248,7 @@ int hashTypeSet(robj *o, sds field, sds value, int flags) {
         if (hashTypeLength(o) > server.hash_max_ziplist_entries)
             hashTypeConvert(o, OBJ_ENCODING_HT);
     } else if (o->encoding == OBJ_ENCODING_HT) {
+        // 如果编码格式是字典
         dictEntry *de = dictFind(o->ptr,field);
         if (de) {
             sdsfree(dictGetVal(de));
@@ -539,6 +551,7 @@ void hsetCommand(client *c) {
 
     /* 查找key */
     if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
+    // 尝试转化编码格式
     hashTypeTryConversion(o,c->argv,2,c->argc-1);
 
     /* 将[field,value]写入到DB中 */
