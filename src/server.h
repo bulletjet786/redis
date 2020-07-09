@@ -792,6 +792,7 @@ struct sharedObjectsStruct {
 };
 
 /* ZSETs use a specialized version of Skiplists */
+/* skiplist节点 */
 typedef struct zskiplistNode {
     sds ele;
     double score;
@@ -803,9 +804,9 @@ typedef struct zskiplistNode {
 } zskiplistNode;
 
 typedef struct zskiplist {
-    struct zskiplistNode *header, *tail;
-    unsigned long length;
-    int level;
+    struct zskiplistNode *header, *tail;    // 首尾节点
+    unsigned long length;                   // 长度
+    int level;                              // 当前层高
 } zskiplist;
 
 typedef struct zset {
@@ -1647,9 +1648,10 @@ void receiveChildInfo(void);
 #define ZADD_CH (1<<16)      /* Return num of elements added or updated. */
 
 /* Struct to hold a inclusive/exclusive range spec by score comparison. */
+/* 用于表达区间，[min,max]\(min,max)\[min,max)\(min,max] */
 typedef struct {
     double min, max;
-    int minex, maxex; /* are min or max exclusive? */
+    int minex, maxex;  // min和max是否是开放的
 } zrangespec;
 
 /* Struct to hold an inclusive/exclusive range spec by lexicographic comparison. */
