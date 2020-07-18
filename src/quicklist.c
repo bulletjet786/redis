@@ -46,18 +46,12 @@
 /* 基于字节填充的优化等级 */
 static const size_t optimization_level[] = {4096, 8192, 16384, 32768, 65536};
 
-/* Maximum size in bytes of any multi-element ziplist.
- * Larger values will live in their own isolated ziplists. */
 /* 多entry的ziplist的最大size，更大size的entry->value的entry将会放在一个单独的ziplist中 */
 #define SIZE_SAFETY_LIMIT 8192
 
-/* Minimum ziplist size in bytes for attempting compression. */
 /* 可以进行压缩的最小尺寸 */
 #define MIN_COMPRESS_BYTES 48
 
-/* Minimum size reduction in bytes to store compressed quicklistNode data.
- * This also prevents us from storing compression if the compression
- * resulted in a larger size than the original data. */
 /* 如果压缩节省的空间不大于该值，则不压缩 */
 #define MIN_COMPRESS_IMPROVE 8
 

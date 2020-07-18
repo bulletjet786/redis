@@ -379,6 +379,7 @@ typedef long long mstime_t; /* millisecond time type. */
 /* Redis maxmemory strategies. Instead of using just incremental number
  * for this defines, we use a set of flags so that testing for certain
  * properties common to multiple policies is faster. */
+/* Redis内存淘汰策略。我们通过设置一系列的位来测试，这样我们可以同同时测试多种策略 */
 #define MAXMEMORY_FLAG_LRU (1<<0)
 #define MAXMEMORY_FLAG_LFU (1<<1)
 #define MAXMEMORY_FLAG_ALLKEYS (1<<2)
@@ -450,6 +451,7 @@ typedef long long mstime_t; /* millisecond time type. */
 /* Using the following macro you can run code inside serverCron() with the
  * specified period, specified in milliseconds.
  * The actual resolution depends on server.hz. */
+/* 使用下面的宏 */
 #define run_with_period(_ms_) if ((_ms_ <= 1000/server.hz) || !(server.cronloops%((_ms_)/(1000/server.hz))))
 
 /* We can print the stacktrace, so our assert is defined this way: */
@@ -584,29 +586,29 @@ typedef struct RedisModuleDigest {
 /* Objects encoding. Some kind of objects like Strings and Hashes can be
  * internally represented in multiple ways. The 'encoding' field of the object
  * is set to one of this fields for this object. */
-#define OBJ_ENCODING_RAW 0     /* Raw representation */
-#define OBJ_ENCODING_INT 1     /* Encoded as integer */
-#define OBJ_ENCODING_HT 2      /* Encoded as hash table */
-#define OBJ_ENCODING_ZIPMAP 3  /* Encoded as zipmap */
-#define OBJ_ENCODING_LINKEDLIST 4 /* No longer used: old list encoding. */
-#define OBJ_ENCODING_ZIPLIST 5 /* Encoded as ziplist */
-#define OBJ_ENCODING_INTSET 6  /* Encoded as intset */
-#define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */
-#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */
-#define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of ziplists */
-#define OBJ_ENCODING_STREAM 10 /* Encoded as a radix tree of listpacks */
+#define OBJ_ENCODING_RAW 0     /* 原始sds */
+#define OBJ_ENCODING_INT 1     /* 整数 */
+#define OBJ_ENCODING_HT 2      /* 哈希表 */
+#define OBJ_ENCODING_ZIPMAP 3  /* 压缩字典，未使用 */
+#define OBJ_ENCODING_LINKEDLIST 4 /* 双端列表，不再使用了 */
+#define OBJ_ENCODING_ZIPLIST 5 /* 压缩列表 */
+#define OBJ_ENCODING_INTSET 6  /* 整数集合 */
+#define OBJ_ENCODING_SKIPLIST 7  /* 跳表 */
+#define OBJ_ENCODING_EMBSTR 8  /* 内嵌式sds */
+#define OBJ_ENCODING_QUICKLIST 9 /* 快表 */
+#define OBJ_ENCODING_STREAM 10 /* listpack前缀树 */
 
 #define LRU_BITS 24
-#define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* Max value of obj->lru */
-#define LRU_CLOCK_RESOLUTION 1000 /* LRU clock resolution in ms */
+#define LRU_CLOCK_MAX ((1<<LRU_BITS)-1) /* LRU最大值 */
+#define LRU_CLOCK_RESOLUTION 1000 /* LRU时钟精度，一个lru时间单位所占用的ms数 */
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
 typedef struct redisObject {
-    unsigned type:4;
-    unsigned encoding:4;
-    unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
-                            * LFU data (least significant 8 bits frequency
-                            * and most significant 16 bits access time). */
+    unsigned type:4;                // 对象类型
+    unsigned encoding:4;            // 对象编码
+    /* 当用于LRU时，表示最后一次访问时间
+     * 当用于LFU时，高16位记录分钟级别访问时间，低8位记录访问频次 */
+    unsigned lru:LRU_BITS;
     int refcount;
     void *ptr;
 } robj;
@@ -933,7 +935,7 @@ struct redisServer {
     int config_hz;              /* Configured HZ value. May be different than
                                    the actual 'hz' field value if dynamic-hz
                                    is enabled. */
-    int hz;                     /* serverCron() calls frequency in hertz */
+    int hz;                     /* 1s中内serverCron()调用的次数 */
     redisDb *db;
     dict *commands;             /* 主命令映射表 */
     dict *orig_commands;        /* 备用命令映射表，和主命令映射表构成双buffer，在替换表时可以通过切换减少替换时间 */
@@ -1560,6 +1562,7 @@ int compareStringObjects(robj *a, robj *b);
 int collateStringObjects(robj *a, robj *b);
 int equalStringObjects(robj *a, robj *b);
 unsigned long long estimateObjectIdleTime(robj *o);
+/* 该对象是否是sds类型 */
 #define sdsEncodedObject(objptr) (objptr->encoding == OBJ_ENCODING_RAW || objptr->encoding == OBJ_ENCODING_EMBSTR)
 
 /* Synchronous I/O with timeout */
