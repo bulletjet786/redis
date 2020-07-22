@@ -74,48 +74,32 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
     }
 }
 
-/* Lookup a key for read operations, or return NULL if the key is not found
- * in the specified DB.
+/* 查找一个key用于读操作，如果没找到则返回NULL
  *
- * As a side effect of calling this function:
- * 1. A key gets expired if it reached it's TTL.
- * 2. The key last access time is updated.
- * 3. The global keys hits/misses stats are updated (reported in INFO).
+ * 这个函数将会删除一下副作用：
+ * 1。 如果key的ttl到达，则会进行过期
+ * 2。key的lru字段将会被更新
+ * 3。服务器的hits/misses状态将会被更新
  *
- * This API should not be used when we write to the key after obtaining
- * the object linked to the key, but only for read only operations.
+ * LOOKUP_NONE：无特殊参数
+ * LOOKUP_NOTOUCH：不要修改lru字段
  *
- * Flags change the behavior of this command:
- *
- *  LOOKUP_NONE (or zero): no special flags are passed.
- *  LOOKUP_NOTOUCH: don't alter the last access time of the key.
- *
- * Note: this function also returns NULL if the key is logically expired
- * but still existing, in case this is a slave, since this API is called only
- * for read operations. Even if the key expiry is master-driven, we can
- * correctly report a key is expired on slaves even if the master is lagging
- * expiring our key via DELs in the replication link. */
+ * 注意：当在slave上下文中，如果是读操作，只要这个key逻辑上是过期的，即使它仍然存在还是会返回NULL
+ * key的过期是由master通过一个DEL传播进行驱动的，这样的话，即使master的DEL传播堆积延迟了，
+ * slave仍然会返回正确的值。
+ * */
 robj *lookupKeyReadWithFlags(redisDb *db, robj *key, int flags) {
     robj *val;
 
-    if (expireIfNeeded(db,key) == 1) {
-        /* Key expired. If we are in the context of a master, expireIfNeeded()
-         * returns 0 only when the key does not exist at all, so it's safe
-         * to return NULL ASAP. */
+    if (expireIfNeeded(db,key) == 1) {          // 如果key已经过期了
+        /* 过期key。如果我们在master上下文中，key过期了将会直接删除，返回NULL即可 */
         if (server.masterhost == NULL) return NULL;
 
-        /* However if we are in the context of a slave, expireIfNeeded() will
-         * not really try to expire the key, it only returns information
-         * about the "logical" status of the key: key expiring is up to the
-         * master in order to have a consistent view of master's data set.
-         *
-         * However, if the command caller is not the master, and as additional
-         * safety measure, the command invoked is a read-only command, we can
-         * safely return NULL here, and provide a more consistent behavior
-         * to clients accessign expired values in a read-only fashion, that
-         * will say the key as non existing.
-         *
-         * Notably this covers GETs when slaves are used to scale reads. */
+        /* 如果我们在slave上下文中，expireIfNeeded()将不会真正的过期该key，而是仅仅返回过期的逻辑状态，
+         * 这是因为为了保证主从数据库视图的一致性，从库的过期是由主库驱动的。
+         * 当从库的调用方不是master时，当命令是只读的，对于过期的key，我们会返回NULL，
+         * 来提供一个更加一致性的只读场景的行为模式。
+         * 这种行为模式保证了redis可以用于主从读写分离。*/
         if (server.current_client &&
             server.current_client != server.master &&
             server.current_client->cmd &&
@@ -262,7 +246,7 @@ robj *dbRandomKey(redisDb *db) {
     }
 }
 
-/* Delete a key, value, and associated expiration entry if any, from the DB */
+/* 返回1表示删除成功，返回0表示删除失败 */
 int dbSyncDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
@@ -1140,13 +1124,16 @@ void propagateExpire(redisDb *db, robj *key, int lazy) {
  *
  * The return value of the function is 0 if the key is still valid,
  * otherwise the function returns 1 if the key is expired. */
+/* 返回值0表示key仍然合法，1表示该key已经过期 */
+/* 当上下文是master时，如果过期了将会删除该key，过期返回1，未过期返回0
+ * 当上下文是slave时，如果过期了将会返回1，未过期返回0 */
 int expireIfNeeded(redisDb *db, robj *key) {
     mstime_t when = getExpire(db,key);
     mstime_t now;
 
-    if (when < 0) return 0; /* No expire for this key */
+    if (when < 0) return 0;    // 没有设置过期时间
 
-    /* Don't expire anything while loading. It will be done later. */
+    // 加载期间不进行删除，删除操作将会在之后进行
     if (server.loading) return 0;
 
     /* If we are in the context of a Lua script, we pretend that time is
@@ -1156,19 +1143,14 @@ int expireIfNeeded(redisDb *db, robj *key) {
      * See issue #1525 on Github for more information. */
     now = server.lua_caller ? server.lua_time_start : mstime();
 
-    /* If we are running in the context of a slave, return ASAP:
-     * the slave key expiration is controlled by the master that will
-     * send us synthesized DEL operations for expired keys.
-     *
-     * Still we try to return the right information to the caller,
-     * that is, 0 if we think the key should be still valid, 1 if
-     * we think the key is expired at this time. */
+    /* 如果当前是从库，从库的删除是从主库发送一个同步的DEL操作来控制的
+     * 但是我们仍然返回正确的信息，如果expire合法返回0，expire过期返回1 */
     if (server.masterhost != NULL) return now > when;
 
-    /* Return when this key has not expired */
+    // 未过期直接返回
     if (now <= when) return 0;
 
-    /* Delete the key */
+    // 过期，删除该key
     server.stat_expiredkeys++;
     propagateExpire(db,key,server.lazyfree_lazy_expire);
     notifyKeyspaceEvent(NOTIFY_EXPIRED,

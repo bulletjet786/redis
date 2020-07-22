@@ -1368,8 +1368,7 @@ int zsetAdd(robj *zobj, double score, sds ele, int *flags, double *newscore) {
             }
             return 1;
         } else if (!xx) {
-            /* Optimize: check if the element is too large or the list
-             * becomes too long *before* executing zzlInsert. */
+            /* 当新增加的元素长度>64字节时，或者元素数量>128时，转换为SKIPLIST */
             zobj->ptr = zzlInsert(zobj->ptr,ele,score);
             if (zzlLength(zobj->ptr) > server.zset_max_ziplist_entries)
                 zsetConvert(zobj,OBJ_ENCODING_SKIPLIST);

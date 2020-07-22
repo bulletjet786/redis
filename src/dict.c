@@ -424,8 +424,7 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
     return NULL; /* not found */
 }
 
-/* Remove an element, returning DICT_OK on success or DICT_ERR if the
- * element was not found. */
+/* 删除成功返回DICT_OK，失败返回DICT_ERR */
 int dictDelete(dict *ht, const void *key) {
     return dictGenericDelete(ht,key,0) ? DICT_OK : DICT_ERR;
 }

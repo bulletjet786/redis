@@ -34,12 +34,8 @@
  * Hash type API
  *----------------------------------------------------------------------------*/
 
-/* Check the length of a number of objects to see if we need to convert a
- * ziplist to a real hash. Note that we only check string encoded objects
- * as their string length can be queried in constant time. */
 /* 检查一系列的对象，判断是否需要从ziplist转化成hashtable。我们仅仅检查字符串对象和
- * 他的长度，这个检查可以在常量时间内完成。
- * */
+ * 他的长度，这个检查可以在常量时间内完成。*/
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
     int i;
 

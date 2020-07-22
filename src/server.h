@@ -777,6 +777,7 @@ struct moduleLoadQueueEntry {
     robj **argv;
 };
 
+// redis共享对象
 struct sharedObjectsStruct {
     robj *crlf, *ok, *err, *emptybulk, *czero, *cone, *cnegone, *pong, *space,
     *colon, *nullbulk, *nullmultibulk, *queued,

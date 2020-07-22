@@ -64,14 +64,13 @@ int setTypeAdd(robj *subject, sds value) {
             uint8_t success = 0;
             subject->ptr = intsetAdd(subject->ptr,llval,&success);
             if (success) {
-                /* Convert to regular set when the intset contains
-                 * too many entries. */
+                /* 当intset中包含512以上元素时，转换 */
                 if (intsetLen(subject->ptr) > server.set_max_intset_entries)
                     setTypeConvert(subject,OBJ_ENCODING_HT);
                 return 1;
             }
         } else {
-            /* Failed to get integer from object, convert to regular set. */
+            /* 当新插入元素无法表示为整数时，转换 */
             setTypeConvert(subject,OBJ_ENCODING_HT);
 
             /* The set *was* an intset and this value is not integer

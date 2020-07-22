@@ -1368,10 +1368,7 @@ void beforeSleep(struct aeEventLoop *eventLoop) {
      * later in this function. */
     if (server.cluster_enabled) clusterBeforeSleep();
 
-    /* Run a fast expire cycle (the called function will return
-     * ASAP if a fast cycle is not needed).
-     * 执行一个快速的过期键清理
-     * */
+    /* 如果当前是主，尝试执行一个快速的过期键清理，如果不需要会立即返回 */
     if (server.active_expire_enabled && server.masterhost == NULL)
         activeExpireCycle(ACTIVE_EXPIRE_CYCLE_FAST);
 

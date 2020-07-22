@@ -2208,6 +2208,11 @@ void flushSlavesOutputBuffers(void) {
  * time left for the previous duration. However if the duration is smaller
  * than the time left for the previous pause, no change is made to the
  * left duration. */
+/* 暂停当前的client直到一个指定的unixtime。当客户端暂停时，从客户端的命令将不会执行，
+ * 因此数据库将不会被修改。
+ *
+ *
+ * */
 void pauseClients(mstime_t end) {
     if (!server.clients_paused || end > server.clients_pause_end_time)
         server.clients_pause_end_time = end;
