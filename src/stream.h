@@ -8,6 +8,7 @@
  * a sequence counter. IDs generated in the same millisecond (or in a past
  * millisecond if the clock jumped backward) will use the millisecond time
  * of the latest generated ID and an incremented sequence. */
+/* StreamID: 时间戳和序列号组成，共128位。 */
 typedef struct streamID {
     uint64_t ms;        /* Unix time in milliseconds. */
     uint64_t seq;       /* Sequence number. */

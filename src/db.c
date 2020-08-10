@@ -363,12 +363,9 @@ int selectDb(client *c, int id) {
 }
 
 /*-----------------------------------------------------------------------------
- * Hooks for key space changes.
  * 键空间变更的钩子函数
- * Every time a key in the database is modified the function
- * signalModifiedKey() is called.
- *
- * Every time a DB is flushed the function signalFlushDb() is called.
+ * 每当键被修改时调用signalModifiedKey
+ * 每当数据库被flush时调用signalFlushedDb
  *----------------------------------------------------------------------------*/
 /* 每次键被修改时 */
 void signalModifiedKey(redisDb *db, robj *key) {

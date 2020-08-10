@@ -364,7 +364,7 @@ void incrDecrCommand(client *c, long long incr) {
     if (o && o->refcount == 1 && o->encoding == OBJ_ENCODING_INT &&
         (value < 0 || value >= OBJ_SHARED_INTEGERS) &&
         value >= LONG_MIN && value <= LONG_MAX)
-    {
+    {       // 共享对象
         new = o;
         o->ptr = (void*)((long)value);
     } else {

@@ -87,9 +87,7 @@ sds keyspaceEventsFlagsToString(int flags) {
     return res;
 }
 
-/* The API provided to the rest of the Redis core is a simple function:
- *
- * notifyKeyspaceEvent(char *event, robj *key, int dbid);
+/*  notifyKeyspaceEvent(char *event, robj *key, int dbid);
  * 'type' 键空间变更通知分类
  * 'event' C字符串表示的事件名，此处为命令，如"zrem"，"del"
  * 'key' redisObject表示的key名
@@ -100,11 +98,12 @@ void notifyKeyspaceEvent(int type, char *event, robj *key, int dbid) {
     int len = -1;
     char buf[24];
 
-    /* If any modules are interested in events, notify the module system now. 
+    /* If any modules are interested in events, notify the module system now.
      * This bypasses the notifications configuration, but the module engine
      * will only call event subscribers if the event type matches the types
      * they are interested in. */
-    /* 将该事件通知给感兴趣的module */
+    /* 将该事件通知给感兴趣的module，这会绕开notifications的配置，
+     * 不过如果事件类型匹配，模块引擎也仅仅可以调用事件订阅。 */
      moduleNotifyKeyspaceEvent(type, event, key, dbid);
     
     /* 如果当前type分类被关闭，就直接返回 */

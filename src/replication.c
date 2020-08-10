@@ -274,6 +274,7 @@ void replicationFeedSlaves(list *slaves, int dictid, robj **argv, int argc) {
 
 /* This function is used in order to proxy what we receive from our master
  * to our sub-slaves. */
+/* 这个函数用来实现代理：将我们从master客户端节点接收到的命令复制到子slave */
 #include <ctype.h>
 void replicationFeedSlavesFromMasterStream(list *slaves, char *buf, size_t buflen) {
     listNode *ln;
@@ -1047,8 +1048,7 @@ void shiftReplicationId(void) {
 
 /* ----------------------------------- SLAVE -------------------------------- */
 
-/* Returns 1 if the given replication state is a handshake state,
- * 0 otherwise. */
+/* 如果当前复制状态为正在握手，则返回1 */
 int slaveIsInHandshakeState(void) {
     return server.repl_state >= REPL_STATE_RECEIVE_PONG &&
            server.repl_state <= REPL_STATE_RECEIVE_PSYNC;
@@ -1313,21 +1313,17 @@ error:
     return;
 }
 
-/* Send a synchronous command to the master. Used to send AUTH and
- * REPLCONF commands before starting the replication with SYNC.
- *
- * The command returns an sds string representing the result of the
- * operation. On error the first byte is a "-".
- */
+/* 发送一个同步的命令到master。在开始复制前用来发送AUTH和REPLCONF命令
+ * 这个命令返回一个sds字符串表示的结果，当出现错误时第一个字节为- */
 #define SYNC_CMD_READ (1<<0)
 #define SYNC_CMD_WRITE (1<<1)
 #define SYNC_CMD_FULL (SYNC_CMD_READ|SYNC_CMD_WRITE)
 char *sendSynchronousCommand(int flags, int fd, ...) {
 
-    /* Create the command to send to the master, we use redis binary
-     * protocol to make sure correct arguments are sent. This function
-     * is not safe for all binary data. */
+    /* 创建一个命令发送给master，我们使用一个redis二进制协议来保证要发送的参数争取。
+     * 这个函数并非对所有二进制数据都是安全的。 */
     if (flags & SYNC_CMD_WRITE) {
+        // 构造redis二进制协议数据
         char *arg;
         va_list ap;
         sds cmd = sdsempty();
@@ -1349,7 +1345,7 @@ char *sendSynchronousCommand(int flags, int fd, ...) {
         cmd = sdscatsds(cmd,cmdargs);
         sdsfree(cmdargs);
 
-        /* Transfer command to the server. */
+        /* 同步传输命令到服务器 */
         if (syncWrite(fd,cmd,sdslen(cmd),server.repl_syncio_timeout*1000)
             == -1)
         {
@@ -1360,10 +1356,11 @@ char *sendSynchronousCommand(int flags, int fd, ...) {
         sdsfree(cmd);
     }
 
-    /* Read the reply from the server. */
+    /* 读取回复 */
     if (flags & SYNC_CMD_READ) {
         char buf[256];
 
+        // 从fd中读取最多256个字节来查找'\n'
         if (syncReadLine(fd,buf,sizeof(buf),server.repl_syncio_timeout*1000)
             == -1)
         {
@@ -1590,6 +1587,7 @@ int slaveTryPartialResynchronization(int fd, int read_reply) {
 
 /* This handler fires when the non blocking connect was able to
  * establish a connection with the master. */
+/* 这个函数将会在一个非阻塞的客户端连接到master后触发 */
 void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     char tmpfile[256], *err = NULL;
     int dfd = -1, maxtries = 5;
@@ -1599,8 +1597,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     UNUSED(privdata);
     UNUSED(mask);
 
-    /* If this event fired after the user turned the instance into a master
-     * with SLAVEOF NO ONE we must just return ASAP. */
+    /* 当用户将服务器切换到master后，关闭socket */
     if (server.repl_state == REPL_STATE_NONE) {
         close(fd);
         return;
@@ -1608,6 +1605,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* Check for errors in the socket: after a non blocking connect() we
      * may find that the socket is in error state. */
+    /* 一个非阻塞的连接可能会触发error，如果出现了错误，我们跳转到error */
     if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &sockerr, &errlen) == -1)
         sockerr = errno;
     if (sockerr) {
@@ -1616,15 +1614,13 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         goto error;
     }
 
-    /* Send a PING to check the master is able to reply without errors. */
+    /* 发送一个PING命令检查master是否有能力回复 */
     if (server.repl_state == REPL_STATE_CONNECTING) {
         serverLog(LL_NOTICE,"Non blocking connect for SYNC fired the event.");
-        /* Delete the writable event so that the readable event remains
-         * registered and we can wait for the PONG reply. */
+        // 删除写事件，我们只关注PONG回复，切换状态
         aeDeleteFileEvent(server.el,fd,AE_WRITABLE);
         server.repl_state = REPL_STATE_RECEIVE_PONG;
-        /* Send the PING, don't check for errors at all, we have the timeout
-         * that will take care about this. */
+        // 发送PING，如果出现了错误，那么就跳转到write_error
         err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,"PING",NULL);
         if (err) goto write_error;
         return;
@@ -1634,11 +1630,10 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
     if (server.repl_state == REPL_STATE_RECEIVE_PONG) {
         err = sendSynchronousCommand(SYNC_CMD_READ,fd,NULL);
 
-        /* We accept only two replies as valid, a positive +PONG reply
-         * (we just check for "+") or an authentication error.
-         * Note that older versions of Redis replied with "operation not
-         * permitted" instead of using a proper error code, so we test
-         * both. */
+        /* +PONG 正常响应
+         * --NOAUTH 需要进行验证
+         * -ERR operation not permitted 老版本，需要进行验证
+         * */
         if (err[0] != '+' &&
             strncmp(err,"-NOAUTH",7) != 0 &&
             strncmp(err,"-ERR operation not permitted",28) != 0)
@@ -1651,10 +1646,11 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
                 "Master replied to PING, replication can continue...");
         }
         sdsfree(err);
+        // 切换到待发送AUTH状态
         server.repl_state = REPL_STATE_SEND_AUTH;
     }
 
-    /* AUTH with the master if required. */
+    /* 如果master需要，我们就进行验证，否则我们切换到待发送端口状态 */
     if (server.repl_state == REPL_STATE_SEND_AUTH) {
         if (server.masterauth) {
             err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,"AUTH",server.masterauth,NULL);
@@ -1666,7 +1662,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         }
     }
 
-    /* Receive AUTH reply. */
+    /* 接收AUTH回复，如果通过，切换到待发送端口状态 */
     if (server.repl_state == REPL_STATE_RECEIVE_AUTH) {
         err = sendSynchronousCommand(SYNC_CMD_READ,fd,NULL);
         if (err[0] == '-') {
@@ -1678,8 +1674,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         server.repl_state = REPL_STATE_SEND_PORT;
     }
 
-    /* Set the slave port, so that Master's INFO command can list the
-     * slave listening port correctly. */
+    /* 如果配置了server.slave_announce_port，则使用slave_announce_port，否则使用server.port  */
     if (server.repl_state == REPL_STATE_SEND_PORT) {
         sds port = sdsfromlonglong(server.slave_announce_port ?
             server.slave_announce_port : server.port);
@@ -1692,11 +1687,10 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    /* Receive REPLCONF listening-port reply. */
+    /* 接收 REPLCONF listeniing-port [port] 的响应 */
     if (server.repl_state == REPL_STATE_RECEIVE_PORT) {
         err = sendSynchronousCommand(SYNC_CMD_READ,fd,NULL);
-        /* Ignore the error if any, not all the Redis versions support
-         * REPLCONF listening-port. */
+        /*忽略，不是所有redis版本都支持  REPLCONF listening-port. */
         if (err[0] == '-') {
             serverLog(LL_NOTICE,"(Non critical) Master does not understand "
                                 "REPLCONF listening-port: %s", err);
@@ -1705,7 +1699,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         server.repl_state = REPL_STATE_SEND_IP;
     }
 
-    /* Skip REPLCONF ip-address if there is no slave-announce-ip option set. */
+    /* 如果没有配置slave-announce-ip，则跳过 */
     if (server.repl_state == REPL_STATE_SEND_IP &&
         server.slave_announce_ip == NULL)
     {
@@ -1714,6 +1708,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
 
     /* Set the slave ip, so that Master's INFO command can list the
      * slave IP address port correctly in case of port forwarding or NAT. */
+    /* 发送 REPLCONF ip-address [ip] */
     if (server.repl_state == REPL_STATE_SEND_IP) {
         err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,"REPLCONF",
                 "ip-address",server.slave_announce_ip, NULL);
@@ -1723,11 +1718,10 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    /* Receive REPLCONF ip-address reply. */
+    /* 接收 REPLCONF ip-address [ip] 的响应 */
     if (server.repl_state == REPL_STATE_RECEIVE_IP) {
         err = sendSynchronousCommand(SYNC_CMD_READ,fd,NULL);
-        /* Ignore the error if any, not all the Redis versions support
-         * REPLCONF listening-port. */
+        /* 忽略，不是所有redis版本都支持 REPLCONF ip-address */
         if (err[0] == '-') {
             serverLog(LL_NOTICE,"(Non critical) Master does not understand "
                                 "REPLCONF ip-address: %s", err);
@@ -1736,12 +1730,12 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         server.repl_state = REPL_STATE_SEND_CAPA;
     }
 
-    /* Inform the master of our (slave) capabilities.
+    /* 宣告我们的slave支持的能力
+     * EOF：支持EOF格式的RDB无盘复制
+     * PSYNC2：支持PSYNC v2，所以能够理解 +CONTINUE <new repl ID>
      *
-     * EOF: supports EOF-style RDB transfer for diskless replication.
-     * PSYNC2: supports PSYNC v2, so understands +CONTINUE <new repl ID>.
-     *
-     * The master will ignore capabilities it does not understand. */
+     * master将会忽略它无法理解的能力
+     * */
     if (server.repl_state == REPL_STATE_SEND_CAPA) {
         err = sendSynchronousCommand(SYNC_CMD_WRITE,fd,"REPLCONF",
                 "capa","eof","capa","psync2",NULL);
@@ -1751,11 +1745,10 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    /* Receive CAPA reply. */
+    /* 接收CAPA回复 */
     if (server.repl_state == REPL_STATE_RECEIVE_CAPA) {
         err = sendSynchronousCommand(SYNC_CMD_READ,fd,NULL);
-        /* Ignore the error if any, not all the Redis versions support
-         * REPLCONF capa. */
+        /* 忽略，不是所有redis版本都支持 REPLCONF capa. */
         if (err[0] == '-') {
             serverLog(LL_NOTICE,"(Non critical) Master does not understand "
                                   "REPLCONF capa: %s", err);
@@ -1769,6 +1762,7 @@ void syncWithMaster(aeEventLoop *el, int fd, void *privdata, int mask) {
      * to start a full resynchronization so that we get the master run id
      * and the global offset, to try a partial resync at the next
      * reconnection attempt. */
+    /* 尝试执行一个部分重同步。如果 */
     if (server.repl_state == REPL_STATE_SEND_PSYNC) {
         if (slaveTryPartialResynchronization(fd,0) == PSYNC_WRITE_ERROR) {
             err = sdsnew("Write error sending the PSYNC command.");
@@ -1862,12 +1856,17 @@ error:
     server.repl_state = REPL_STATE_CONNECT;
     return;
 
-write_error: /* Handle sendSynchronousCommand(SYNC_CMD_WRITE) errors. */
+write_error:     // 处理同步发送命令的错误
     serverLog(LL_WARNING,"Sending command to master in replication handshake: %s", err);
     sdsfree(err);
     goto error;
 }
 
+/* 连接上master
+ * 1. 创建socket，连接上master
+ * 2. 注册该socket的读写时间为syncWithMaster函数
+ * 3. 修改复制相关状态
+ * */
 int connectWithMaster(void) {
     int fd;
 
@@ -1924,6 +1923,10 @@ void replicationAbortSyncTransfer(void) {
  * the replication state (server.repl_state) set to REPL_STATE_CONNECT.
  *
  * Otherwise zero is returned and no operation is perforemd at all. */
+/* 这个函数将会通过取消一个非阻塞的连接或者初始化的传输过程，来终止一个正在进行中的复制。
+ *
+ * 如果当前有一个正在进行中的复制，将会取下并设置为未连接状态，否则返回0且什么都不做。
+ * */
 int cancelReplicationHandshake(void) {
     if (server.repl_state == REPL_STATE_TRANSFER) {
         replicationAbortSyncTransfer();
@@ -1939,7 +1942,7 @@ int cancelReplicationHandshake(void) {
     return 1;
 }
 
-/* Set replication to the specified master address and port. */
+/* 设置指定的ip:port为master */
 void replicationSetMaster(char *ip, int port) {
     int was_master = server.masterhost == NULL;
 
@@ -1957,11 +1960,13 @@ void replicationSetMaster(char *ip, int port) {
     cancelReplicationHandshake();
     /* Before destroying our master state, create a cached master using
      * our own parameters, to later PSYNC with the new master. */
+    /* 在销毁master状态之前，使用我们自己的参数创建一个cached状态，用于等会部分重同步 */
     if (was_master) replicationCacheMasterUsingMyself();
+    // 设置当前复制状态为待连接
     server.repl_state = REPL_STATE_CONNECT;
 }
 
-/* Cancel replication, setting the instance as a master itself. */
+/* 取消复制，将当前服务器设置为master */
 void replicationUnsetMaster(void) {
     if (server.masterhost == NULL) return; /* Nothing to do. */
     sdsfree(server.masterhost);
@@ -2006,15 +2011,13 @@ void replicationHandleMasterDisconnection(void) {
 }
 
 void replicaofCommand(client *c) {
-    /* SLAVEOF is not allowed in cluster mode as replication is automatically
-     * configured using the current address of the master node. */
+    /*  集群模式下不允许执行SLAVEOF，因为复制是使用当前master节点地址自动配置的 */
     if (server.cluster_enabled) {
         addReplyError(c,"REPLICAOF not allowed in cluster mode.");
         return;
     }
 
-    /* The special host/port combination "NO" "ONE" turns the instance
-     * into a master. Otherwise the new master address is set. */
+    /* slave of no one 将会使当前服务器变更为master，否则将会设置master的地址 */
     if (!strcasecmp(c->argv[1]->ptr,"no") &&
         !strcasecmp(c->argv[2]->ptr,"one")) {
         if (server.masterhost) {
@@ -2030,15 +2033,14 @@ void replicaofCommand(client *c) {
         if ((getLongFromObjectOrReply(c, c->argv[2], &port, NULL) != C_OK))
             return;
 
-        /* Check if we are already attached to the specified slave */
+        /* 如果当前服务器已经将要跟随的机器设置为主服务器，则直接返回+OK */
         if (server.masterhost && !strcasecmp(server.masterhost,c->argv[1]->ptr)
             && server.masterport == port) {
             serverLog(LL_NOTICE,"REPLICAOF would result into synchronization with the master we are already connected with. No operation performed.");
             addReplySds(c,sdsnew("+OK Already connected to specified master\r\n"));
             return;
         }
-        /* There was no previous master or the user specified a different one,
-         * we can continue. */
+        /* 如果跟随一个新的master，则继续 */
         replicationSetMaster(c->argv[1]->ptr, port);
         sds client = catClientInfoString(sdsempty(),c);
         serverLog(LL_NOTICE,"REPLICAOF %s:%d enabled (user request from '%s')",
@@ -2512,11 +2514,11 @@ long long replicationGetSlaveOffset(void) {
 
 /* --------------------------- REPLICATION CRON  ---------------------------- */
 
-/* Replication cron function, called 1 time per second. */
+/* 复制核心函数，每秒执行一次 */
 void replicationCron(void) {
     static long long replication_cron_loops = 0;
 
-    /* Non blocking connection timeout? */
+    /* 如果当前服务器含有slave角色，非阻塞连接或者握手超时，则取消当前握手，重连 */
     if (server.masterhost &&
         (server.repl_state == REPL_STATE_CONNECTING ||
          slaveIsInHandshakeState()) &&
@@ -2526,7 +2528,7 @@ void replicationCron(void) {
         cancelReplicationHandshake();
     }
 
-    /* Bulk transfer I/O timeout? */
+    /* 如果当前服务器含有slave角色，接受RDB超时，取消当前握手，重连 */
     if (server.masterhost && server.repl_state == REPL_STATE_TRANSFER &&
         (time(NULL)-server.repl_transfer_lastio) > server.repl_timeout)
     {
@@ -2535,6 +2537,7 @@ void replicationCron(void) {
     }
 
     /* Timed out master when we are an already connected slave? */
+    /*  */
     if (server.masterhost && server.repl_state == REPL_STATE_CONNECTED &&
         (time(NULL)-server.master->lastinteraction) > server.repl_timeout)
     {
@@ -2542,7 +2545,7 @@ void replicationCron(void) {
         freeClient(server.master);
     }
 
-    /* Check if we should connect to a MASTER */
+    /* 检查是否需要连接一个master */
     if (server.repl_state == REPL_STATE_CONNECT) {
         serverLog(LL_NOTICE,"Connecting to MASTER %s:%d",
             server.masterhost, server.masterport);

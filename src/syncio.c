@@ -39,18 +39,21 @@
  * the key). This is why need the following blocking I/O functions.
  *
  * All the functions take the timeout in milliseconds. */
+/* Redis在大部分时候都是使用的非阻塞方式，除了slave在SYNC命令需要以阻塞方式，
+ * MIGRATE命令必须阻塞是为了保证能够提供两个实例之间的原子视图
+ * 这就是为什么我们需要提供阻塞IO的原因 */
 
 #define SYNCIO__RESOLUTION 10 /* Resolution in milliseconds */
 
-/* Write the specified payload to 'fd'. If writing the whole payload will be
- * done within 'timeout' milliseconds the operation succeeds and 'size' is
- * returned. Otherwise the operation fails, -1 is returned, and an unspecified
- * partial write could be performed against the file descriptor. */
+/* 写一个payload到fd中。如果整个payload在timeout内被传输完成，size将会返回。
+ * 否则如果这个操作失败，-1将会被返回，并且可能会有部分写到fd中。
+ * */
 ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
     ssize_t nwritten, ret = size;
     long long start = mstime();
     long long remaining = timeout;
 
+    // 如果函数中间触发了部分写，我们将会在timeout时间内进行重试，直到成功或超时。
     while(1) {
         long long wait = (remaining > SYNCIO__RESOLUTION) ?
                           remaining : SYNCIO__RESOLUTION;
@@ -68,6 +71,7 @@ ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
         if (size == 0) return ret;
 
         /* Wait */
+        /* 仅在当前fd上进行等待 */
         aeWait(fd,AE_WRITABLE,wait);
         elapsed = mstime() - start;
         if (elapsed >= timeout) {
@@ -78,10 +82,8 @@ ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
     }
 }
 
-/* Read the specified amount of bytes from 'fd'. If all the bytes are read
- * within 'timeout' milliseconds the operation succeed and 'size' is returned.
- * Otherwise the operation fails, -1 is returned, and an unspecified amount of
- * data could be read from the file descriptor. */
+/* 从fd中读取指定数量的字节，如果所有的字节在timeout内被读取，将会返回size，
+ * 否则返回-1，并且有未指定数量的部分数据被读出 */
 ssize_t syncRead(int fd, char *ptr, ssize_t size, long long timeout) {
     ssize_t nread, totread = 0;
     long long start = mstime();
@@ -117,11 +119,9 @@ ssize_t syncRead(int fd, char *ptr, ssize_t size, long long timeout) {
     }
 }
 
-/* Read a line making sure that every char will not require more than 'timeout'
- * milliseconds to be read.
- *
- * On success the number of bytes read is returned, otherwise -1.
- * On success the string is always correctly terminated with a 0 byte. */
+/* 在timeout中时间内读取最多size个字节，直到读到了'\n'
+ * 成功时将会返回读到的字节数，否则返回-1，并且ptr总是以'\0'结束
+ */
 ssize_t syncReadLine(int fd, char *ptr, ssize_t size, long long timeout) {
     ssize_t nread = 0;
 

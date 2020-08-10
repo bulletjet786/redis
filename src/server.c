@@ -1319,8 +1319,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     /* Clear the paused clients flag if needed. */
     clientsArePaused(); /* Don't check return value, just use the side effect.*/
 
-    /* Replication cron function -- used to reconnect to master,
-     * detect transfer failures, start background RDB transfers and so forth. */
+    /* 复制：用来重连master，检测传输错误，开始后台RDB传输，等等 */
     run_with_period(1000) replicationCron();
 
     /* Run the Redis Cluster cron. */
@@ -2386,25 +2385,19 @@ void preventCommandReplication(client *c) {
  * CMD_CALL_SLOWLOG     检查该命令执行时间，条件达到时写入慢日志
  * CMD_CALL_STATS       Populate command stats.
  * CMD_CALL_PROPAGATE_AOF   如果该命令修改了数据库或者客户端强制，则追加到AOF日志中
- * CMD_CALL_PROPAGATE_REPL  Send command to salves if it modified the dataset
- *                          or if the client flags are forcing propagation.
+ * CMD_CALL_PROPAGATE_REPL  如果命令会修改数据库或者客户端设置了FORCE_PROGATION标志则发送到slaves
  * CMD_CALL_PROPAGATE   Alias for PROPAGATE_AOF|PROPAGATE_REPL.
  * CMD_CALL_FULL        Alias for SLOWLOG|STATS|PROPAGATE.
  *
- * The exact propagation behavior depends on the client flags.
- * Specifically:
- *
- * 1. If the client flags CLIENT_FORCE_AOF or CLIENT_FORCE_REPL are set
- *    and assuming the corresponding CMD_CALL_PROPAGATE_AOF/REPL is set
- *    in the call flags, then the command is propagated even if the
- *    dataset was not affected by the command.
- * 2. If the client flags CLIENT_PREVENT_REPL_PROP or CLIENT_PREVENT_AOF_PROP
- *    are set, the propagation into AOF or to slaves is not performed even
- *    if the command modified the dataset.
- *
- * Note that regardless of the client flags, if CMD_CALL_PROPAGATE_AOF
- * or CMD_CALL_PROPAGATE_REPL are not set, then respectively AOF or
- * slaves propagation will never occur.
+ * 精确的传播行为还取决于客户端标志：
+ * 1。如果客户端带有CLIENT_FORCE_AOF或者CLIENT_FORCE_REPL，
+ * 并且调用该函数中时带有CMD_CALL_PROPAGATE_AOF/REPL标志，
+ * 即使没有修改数据库，也会进行传播到AOF和slaves。
+ * 2。如果客户端带有CLIENT_PREVENT_REPL_PROP或者CLIENT_PREVENT_AOF_PROP，
+ * 即使数据库被修改了，也不会传播到AOF和slaves中。
+ * 注意：不管客户端的标志是什么，
+ * 如果调用时CMD_CALL_PROPAGATE_AOF或者CMD_CALL_PROPAGATE_REPL，
+ * AOF和子slaves的传播行为都不会发生。
  *
  * Client flags are modified by the implementation of a given command
  * using the following API:
@@ -2420,8 +2413,6 @@ void call(client *c, int flags) {
     int client_old_flags = c->flags;
     struct redisCommand *real_cmd = c->cmd;
 
-    /* Sent the command to clients in MONITOR mode, only if the commands are
-     * not generated from reading an AOF. */
     /* 当有客户端在监视该服务器时，向监视客户端发送当前处理的命令请求的相关信息
      * 在下列情况下不发送：
      * 1. 服务器在加载数据库
@@ -2434,8 +2425,7 @@ void call(client *c, int flags) {
         replicationFeedMonitors(c,server.monitors,c->db->id,c->argv,c->argc);
     }
 
-    /* Initialization: clear the flags that must be set by the command on
-     * demand, and initialize the array for additional commands propagation. */
+    /* 初始化：清空相关的标志，这些标志将会被命令按照要求进行设置，并初始化also_propagate数组 */
     c->flags &= ~(CLIENT_FORCE_AOF|CLIENT_FORCE_REPL|CLIENT_PREVENT_PROP);
     redisOpArray prev_also_propagate = server.also_propagate;
     redisOpArrayInit(&server.also_propagate);
@@ -2463,8 +2453,7 @@ void call(client *c, int flags) {
             server.lua_caller->flags |= CLIENT_FORCE_AOF;
     }
 
-    /* Log the command into the Slow log if needed, and populate the
-     * per-command statistics that we show in INFO commandstats. */
+    /* 必要时记录慢日志，并且填充每个命令的统计信息在INFO命令状态中 */
     /* 如果设置CMD_CALL_SLOWLOG位并且该命令不是EXEC命令，则需要记录慢日志 */
     if (flags & CMD_CALL_SLOWLOG && c->cmd->proc != execCommand) {
         char *latency_event = (c->cmd->flags & CMD_FAST) ?
@@ -2480,28 +2469,20 @@ void call(client *c, int flags) {
         real_cmd->calls++;
     }
 
-    /* Propagate the command into the AOF and replication link */
     /* 传播命令到AOF文件和从服务器 */
     if (flags & CMD_CALL_PROPAGATE &&
         (c->flags & CLIENT_PREVENT_PROP) != CLIENT_PREVENT_PROP)
     {
         int propagate_flags = PROPAGATE_NONE;
 
-        /* Check if the command operated changes in the data set. If so
-         * set for replication / AOF propagation. */
         /* 检查该命令是否修改了数据集，如果是，则进行传播 */
         if (dirty) propagate_flags |= (PROPAGATE_AOF|PROPAGATE_REPL);
 
-        /* If the client forced AOF / replication of the command, set
-         * the flags regardless of the command effects on the data set. */
-        /* 如果客户端设置了强制强制服务，则也需要进行传播 */
+        /* 如果客户端设置了强制传播，则也需要进行传播 */
         if (c->flags & CLIENT_FORCE_REPL) propagate_flags |= PROPAGATE_REPL;
         if (c->flags & CLIENT_FORCE_AOF) propagate_flags |= PROPAGATE_AOF;
 
-        /* However prevent AOF / replication propagation if the command
-         * implementations called preventCommandPropagation() or similar,
-         * or if we don't have the call() flags to do so. */
-        /* 然而如果该命令实现了preventCommandPropagation()之类的方法，或者没有call()标志，我们不记性传播 */
+        /* 然而如果该命令实现了preventCommandPropagation()之类的方法，或者没有调用call()的相关标志，我们不进行传播 */
         if (c->flags & CLIENT_PREVENT_REPL_PROP ||
             !(flags & CMD_CALL_PROPAGATE_REPL))
                 propagate_flags &= ~PROPAGATE_REPL;
@@ -2509,11 +2490,8 @@ void call(client *c, int flags) {
             !(flags & CMD_CALL_PROPAGATE_AOF))
                 propagate_flags &= ~PROPAGATE_AOF;
 
-        /* Call propagate() only if at least one of AOF / replication
-         * propagation is needed. Note that modules commands handle replication
-         * in an explicit way, so we never replicate them automatically. */
         /* 仅当需要进行传播并且该命令不是Module命令时，才进行复制。
-         * Module命令以一种显式的方式进行复制，所以我们不会进行自动服复制。 */
+         * Module命令以一种显式的方式进行复制，所以我们不会进行自动复制。 */
         if (propagate_flags != PROPAGATE_NONE && !(c->cmd->flags & CMD_MODULE))
             propagate(c->cmd,c->db->id,c->argv,c->argc,propagate_flags);
     }
@@ -2548,31 +2526,21 @@ void call(client *c, int flags) {
     server.stat_numcommands++;
 }
 
-/* If this function gets called we already read a whole
- * command, arguments are in the client argv/argc fields.
- * processCommand() execute the command or prepare the
- * server for a bulk read from the client.
- *
- * If C_OK is returned the client is still alive and valid and
- * other operations can be performed by the caller. Otherwise
- * if C_ERR is returned the client was destroyed (i.e. after QUIT). */
-/* 当整个命令是准备好了的时候，将会执行该函数，命令参数及其数量存放在argv和argc字段中 */
+/* 当整个命令读取完成的时候，将会执行该函数，命令参数及其数量存放在argv和argc字段中 */
 /* 当命令合法，操作被执行且客户端仍处于连接状态时返回OK，否则返回ERR */
 int processCommand(client *c) {
     /* The QUIT command is handled separately. Normal command procs will
      * go through checking for replication and QUIT will cause trouble
      * when FORCE_REPLICATION is enabled and would be implemented in
      * a regular command proc. */
-    // QUIT命令需要特殊处理
+    // QUIT命令需要特殊处理。
     if (!strcasecmp(c->argv[0]->ptr,"quit")) {
         addReply(c,shared.ok);
         c->flags |= CLIENT_CLOSE_AFTER_REPLY;
         return C_ERR;
     }
 
-    /* Now lookup the command and check ASAP about trivial error conditions
-     * such as wrong arity, bad command name and so forth. */
-    /* 从server.commands字典中查找出命令对象redisCommand */
+    /* 从server.commands字典中查找出命令对象redisCommand，并尽可能的发现错误问题 */
     c->cmd = c->lastcmd = lookupCommand(c->argv[0]->ptr);
     if (!c->cmd) {              // 当没有找到对应的命令时，返回一个错误回复
         /* 如果客户端处于事务中，添加CLIENT_DIRTY_EXEC标志位，使得后续的EXEC指令失败 */
@@ -2636,12 +2604,9 @@ int processCommand(client *c) {
         }
     }
 
-    /* Handle the maxmemory directive.
-     * 如果服务器开启了最大内存限制，处理内存达到最大相关的指令
-     * First we try to free some memory if possible (if there are volatile
-     * keys in the dataset). If there are not the only thing we can do
-     * is returning an error.
-     * 如果可以的话，首先我们尝试释放一些内存(如果存在一些易变的键在数据集中)，如果内存回收失败，我们将会返回一个ERR
+    /* 如果服务器开启了最大内存限制，处理内存达到最大相关的指令
+     * 如果可以的话，首先我们尝试释放一些内存(如果存在一些易变的键在数据集中)，
+     * 如果内存回收失败，我们将会返回一个ERR
      * Note that we do not want to reclaim memory if we are here re-entering
      * the event loop since there is a busy Lua script running in timeout
      * condition, to avoid mixing the propagation of scripts with the propagation
@@ -2652,8 +2617,7 @@ int processCommand(client *c) {
          * into a slave, that may be the active client, to be freed. */
         if (server.current_client == NULL) return C_ERR;
 
-        /* It was impossible to free enough memory, and the command the client
-         * is trying to execute is denied during OOM conditions? Error. */
+        /* 如果释放更多内存，并且该命令是CMD_DENYOOM，那就返回OOM ERR */
         if ((c->cmd->flags & CMD_DENYOOM) && out_of_memory) {
             flagTransaction(c);
             addReply(c, shared.oomerr);
@@ -2661,8 +2625,6 @@ int processCommand(client *c) {
         }
     }
 
-    /* Don't accept write commands if there are problems persisting on disk
-     * and if this is a master instance. */
     /*  如果上一次执行持久化出错, 并且当前服务器是主服务器，我们不接受写命令 */
     int deny_write_type = writeCommandsDeniedByDiskError();
     if (deny_write_type != DISK_ERROR_TYPE_NONE &&
@@ -2694,8 +2656,7 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* Don't accept write commands if this is a read only slave. But
-     * accept write commands if this is our master. */
+    /* 如果服务器是一个只读的slave，则只允许master客户端执行写命令 */
     if (server.masterhost && server.repl_slave_ro &&
         !(c->flags & CLIENT_MASTER) &&
         c->cmd->flags & CMD_WRITE)
@@ -2704,7 +2665,7 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* Only allow SUBSCRIBE and UNSUBSCRIBE in the context of Pub/Sub */
+    /* 如果客户端处于发布订阅上下文中，则只允许部分命令 */
     if (c->flags & CLIENT_PUBSUB &&
         c->cmd->proc != pingCommand &&
         c->cmd->proc != subscribeCommand &&
@@ -2727,8 +2688,7 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* Loading DB? Return an error if the command has not the
-     * CMD_LOADING flag. */
+    /* 如果正在loading DB，如果该命令没有CMD_LOADING标志，则返回Loading ERR */
     if (server.loading && !(c->cmd->flags & CMD_LOADING)) {
         addReply(c, shared.loadingerr);
         return C_OK;

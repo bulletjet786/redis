@@ -282,8 +282,6 @@ void touchWatchedKey(redisDb *db, robj *key) {
     clients = dictFetchValue(db->watched_keys, key);
     if (!clients) return;
 
-    /* Mark all the clients watching this key as CLIENT_DIRTY_CAS */
-    /* Check if we are already watching for this key */
     listRewind(clients,&li);
     while((ln = listNext(&li))) {
         client *c = listNodeValue(ln);

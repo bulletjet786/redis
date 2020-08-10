@@ -7,7 +7,7 @@
  * the strings "foo", "foobar" and "footer" after the insertion of each
  * word. When the node represents a key inside the radix tree, we write it
  * between [], otherwise it is written between ().
- *
+ * 当该节点是key时，我们使用[]，否则使用()
  * This is the vanilla representation:
  *
  *              (f) ""
@@ -30,6 +30,10 @@
  * and only the link to the node representing the last character node is
  * provided inside the representation. So the above representation is turend
  * into:
+ *
+ * 然而，这个实现使用了一个非常常见的优化。
+ * 具有单个子节点的连续节点被压缩为节点本身的字符串，并且只提供指向最后一个字符的链接。
+ * 如此，则压缩节点必然仅有一个子节点。
  *
  *                  ["foo"] ""
  *                     |
@@ -66,44 +70,25 @@
 
 #define RAX_NODE_MAX_SIZE ((1<<29)-1)
 typedef struct raxNode {
-    uint32_t iskey:1;     /* Does this node contain a key? */
-    uint32_t isnull:1;    /* Associated value is NULL (don't store it). */
-    uint32_t iscompr:1;   /* Node is compressed. */
-    uint32_t size:29;     /* Number of children, or compressed string len. */
-    /* Data layout is as follows:
-     *
-     * If node is not compressed we have 'size' bytes, one for each children
-     * character, and 'size' raxNode pointers, point to each child node.
-     * Note how the character is not stored in the children but in the
-     * edge of the parents:
-     *
-     * [header strlen=0][abc][a-ptr][b-ptr][c-ptr](value-ptr?)
-     *
-     * if node is compressed (strlen != 0) the node has 1 children.
-     * In that case the 'size' bytes of the string stored immediately at
-     * the start of the data section, represent a sequence of successive
-     * nodes linked one after the other, for which only the last one in
-     * the sequence is actually represented as a node, and pointed to by
-     * the current compressed node.
-     *
-     * [header strlen=3][xyz][z-ptr](value-ptr?)
-     *
-     * Both compressed and not compressed nodes can represent a key
-     * with associated data in the radix tree at any level (not just terminal
-     * nodes).
-     *
-     * If the node has an associated key (iskey=1) and is not NULL
-     * (isnull=0), then after the raxNode pointers poiting to the
-     * children, an additional value pointer is present (as you can see
-     * in the representation above as "value-ptr" field).
-     */
+    uint32_t iskey:1;     /* 当前结点是否包含一个key */
+    uint32_t isnull:1;    /* 关联的value是否为NULL */
+    uint32_t iscompr:1;   /* 是否是压缩节点 */
+    uint32_t size:29;     /* 子节点的数量或者压缩字符串长度 */
+    /* 如果节点是非压缩的，size字段表示子字符的数量，且每个字符都有一个字节点。
+     * 注意，子节点的字符实际上不会保存在字节点中，而是在父节点的边界中，data为：
+     * [abc][a-ptr][b-ptr][c-ptr](value-ptr?)
+     * 如果节点是压缩节点，则必然只有一个子节点。size表示此压缩字符串的长度，data为：
+     * [xyz][z-ptr](value-ptr?)
+     * 无论是否压缩节点还是非压缩节点，只要iskey=1，都可以在任何层级上节点关联一个value。
+     * 如果iskey=1&isnull=0，则在data中会有(value-ptr)
+     * */
     unsigned char data[];
 } raxNode;
 
 typedef struct rax {
-    raxNode *head;
-    uint64_t numele;
-    uint64_t numnodes;
+    raxNode *head;      // 基数树的根
+    uint64_t numele;    // 元素数量
+    uint64_t numnodes;  // 节点数量
 } rax;
 
 /* Stack data structure used by raxLowWalk() in order to, optionally, return
