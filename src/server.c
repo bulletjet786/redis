@@ -2182,8 +2182,6 @@ void initServer(void) {
     server.initial_memory_usage = zmalloc_used_memory();
 }
 
-/* Populates the Redis Command Table starting from the hard coded list
- * we have on top of redis.c file. */
 /* 从硬编码的redisCommandTable中填充到server.commands全局变量中 */
 void populateCommandTable(void) {
     int j;
@@ -2303,15 +2301,13 @@ struct redisCommand *lookupCommandOrOriginal(sds name) {
     return cmd;
 }
 
-/* Propagate the specified command (in the context of the specified database id)
- * to AOF and Slaves.
- * 在指定数据库上下文中传播命令到AOF文件和slaves
+/*  在指定数据库上下文中传播命令到AOF文件和slaves
  * flags are an xor between:
  * + PROPAGATE_NONE (no propagation of command at all)
  * + PROPAGATE_AOF (propagate into the AOF file if is enabled)
  * + PROPAGATE_REPL (propagate into the replication link)
  *
- * This should not be used inside commands implementation. Use instead
+ * 这个函数不应该用于命令实现的内部。如果要在内部使用，请使用
  * alsoPropagate(), preventCommandPropagation(), forceCommandPropagation().
  */
 void propagate(struct redisCommand *cmd, int dbid, robj **argv, int argc,
@@ -2378,7 +2374,7 @@ void preventCommandReplication(client *c) {
     c->flags |= CLIENT_PREVENT_REPL_PROP;
 }
 
-/* Call() is the core of Redis execution of a command.
+/* Call()是Redis命令执行的核心
  *
  * The following flags can be passed:
  * CMD_CALL_NONE        No flags.
@@ -2401,12 +2397,11 @@ void preventCommandReplication(client *c) {
  *
  * Client flags are modified by the implementation of a given command
  * using the following API:
- *
+ * Client的标志可以被以下命令API的实现进行修改：
  * forceCommandPropagation(client *c, int flags);
  * preventCommandPropagation(client *c);
  * preventCommandAOF(client *c);
  * preventCommandReplication(client *c);
- *
  */
 void call(client *c, int flags) {
     long long dirty, start, duration;

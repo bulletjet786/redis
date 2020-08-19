@@ -304,20 +304,12 @@ robj *dbUnshareStringValue(redisDb *db, robj *key, robj *o) {
     return o;
 }
 
-/* Remove all keys from all the databases in a Redis server.
- * If callback is given the function is called from time to time to
- * signal that work is in progress.
- *
- * The dbnum can be -1 if all the DBs should be flushed, or the specified
- * DB number if we want to flush only a single Redis database number.
- *
- * Flags are be EMPTYDB_NO_FLAGS if no special flags are specified or
- * EMPTYDB_ASYNC if we want the memory to be freed in a different thread
- * and the function to return ASAP.
- *
- * On success the fuction returns the number of keys removed from the
- * database(s). Otherwise -1 is returned in the specific case the
- * DB number is out of range, and errno is set to EINVAL. */
+/* 清空redis中所有的key
+ * 如果给出了callback，每清理一个key或者expires都会调用该函数。
+ * dbnum=-1表示清空所有数据库，否则清空dbnum号数据库。
+ * flage=EMPTYDB_ASYNC表示异步清理内存。
+ * 成功返回清理的key数目，失败返回1，如果db不存在，设置errno=EINVAL
+ * */
 long long emptyDb(int dbnum, int flags, void(callback)(void*)) {
     int async = (flags & EMPTYDB_ASYNC);
     long long removed = 0;

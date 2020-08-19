@@ -32,22 +32,14 @@
 
 /* ----------------- Blocking sockets I/O with timeouts --------------------- */
 
-/* Redis performs most of the I/O in a nonblocking way, with the exception
- * of the SYNC command where the slave does it in a blocking way, and
- * the MIGRATE command that must be blocking in order to be atomic from the
- * point of view of the two instances (one migrating the key and one receiving
- * the key). This is why need the following blocking I/O functions.
- *
- * All the functions take the timeout in milliseconds. */
 /* Redis在大部分时候都是使用的非阻塞方式，除了slave在SYNC命令需要以阻塞方式，
  * MIGRATE命令必须阻塞是为了保证能够提供两个实例之间的原子视图
  * 这就是为什么我们需要提供阻塞IO的原因 */
 
-#define SYNCIO__RESOLUTION 10 /* Resolution in milliseconds */
+#define SYNCIO__RESOLUTION 10 /* 毫秒级精度 */
 
 /* 写一个payload到fd中。如果整个payload在timeout内被传输完成，size将会返回。
- * 否则如果这个操作失败，-1将会被返回，并且可能会有部分写到fd中。
- * */
+ * 否则如果这个操作失败，-1将会被返回，并且可能会有部分写到fd中。*/
 ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
     ssize_t nwritten, ret = size;
     long long start = mstime();
@@ -70,7 +62,6 @@ ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
         }
         if (size == 0) return ret;
 
-        /* Wait */
         /* 仅在当前fd上进行等待 */
         aeWait(fd,AE_WRITABLE,wait);
         elapsed = mstime() - start;
@@ -83,7 +74,7 @@ ssize_t syncWrite(int fd, char *ptr, ssize_t size, long long timeout) {
 }
 
 /* 从fd中读取指定数量的字节，如果所有的字节在timeout内被读取，将会返回size，
- * 否则返回-1，并且有未指定数量的部分数据被读出 */
+ * 否则返回-1，并且有为止的部分数据被读出，并设置errno=ETIMEDOUT */
 ssize_t syncRead(int fd, char *ptr, ssize_t size, long long timeout) {
     ssize_t nread, totread = 0;
     long long start = mstime();
@@ -120,8 +111,7 @@ ssize_t syncRead(int fd, char *ptr, ssize_t size, long long timeout) {
 }
 
 /* 在timeout中时间内读取最多size个字节，直到读到了'\n'
- * 成功时将会返回读到的字节数，否则返回-1，并且ptr总是以'\0'结束
- */
+ * 成功时将会返回读到的字节数，否则返回-1，并且ptr总是以'\0'结束 */
 ssize_t syncReadLine(int fd, char *ptr, ssize_t size, long long timeout) {
     ssize_t nread = 0;
 

@@ -171,9 +171,8 @@ void clientInstallWriteHandler(client *c) {
         (c->replstate == REPL_STATE_NONE ||
          (c->replstate == SLAVE_STATE_ONLINE && !c->repl_put_online_on_ack)))
     {
-        /* 此处我们用置位和推入链表来代替直直接安装命令回复处理器。
-         * 在beforeSleep时，我们将会直接写socket，然后写不完，才安装回复处理器。
-         * */
+        /* 此处我们用置位和推入链表来代替直接安装命令回复处理器。
+         * 在beforeSleep时，我们将会直接写socket，然后写不完，才安装回复处理器。 */
         c->flags |= CLIENT_PENDING_WRITE;
         listAddNodeHead(server.clients_pending_write,c);
     }
@@ -201,8 +200,7 @@ int prepareClientToWrite(client *c) {
     /* CLIENT REPLY OFF / SKIP handling: don't send replies. */
     if (c->flags & (CLIENT_REPLY_OFF|CLIENT_REPLY_SKIP)) return C_ERR;
 
-    /* Masters don't receive replies, unless CLIENT_MASTER_FORCE_REPLY flag
-     * is set. */
+    /* master不接受reply，除非设置了CLIENT_MASTER_FORCE_REPLY标志 */
     if ((c->flags & CLIENT_MASTER) &&
         !(c->flags & CLIENT_MASTER_FORCE_REPLY)) return C_ERR;
 
@@ -625,6 +623,7 @@ void addReplySubcommandSyntaxError(client *c) {
 /* Copy 'src' client output buffers into 'dst' client output buffers.
  * The function takes care of freeing the old output buffers of the
  * destination client. */
+/* 拷贝src的output到dst中 */
 void copyClientOutputBuffer(client *dst, client *src) {
     listRelease(dst->reply);
     dst->sentlen = 0;
@@ -1180,9 +1179,7 @@ int processInlineBuffer(client *c) {
         return C_ERR;
     }
 
-    /* Newline from slaves can be used to refresh the last ACK time.
-     * This is useful for a slave to ping back while loading a big
-     * RDB file. */
+    /* 从salves过来的空行作为心跳，这个非常有用的，当slaves正在加载一个很大的RDB时 */
     if (querylen == 0 && c->flags & CLIENT_SLAVE)
         c->repl_ack_time = server.unixtime;
 
@@ -1437,7 +1434,7 @@ void processInputBuffer(client *c) {
             /* 当命令执行完成时，我们需要使用resetClient清空手动栈状态 */
             if (processCommand(c) == C_OK) {
                 if (c->flags & CLIENT_MASTER && !(c->flags & CLIENT_MULTI)) {
-                    /* Update the applied replication offset of our master. */
+                    /* 如果当前client是master，则更新复制偏移量 */
                     c->reploff = c->read_reploff - sdslen(c->querybuf) + c->qb_pos;
                 }
 
@@ -1453,7 +1450,7 @@ void processInputBuffer(client *c) {
         }
     }
 
-    /* Trim to pos */
+    /* 清理querybuf中已经完成的命令 */
     if (c->qb_pos) {
         sdsrange(c->querybuf,c->qb_pos,-1);
         c->qb_pos = 0;
@@ -1464,9 +1461,11 @@ void processInputBuffer(client *c) {
 
 /* 这是processInputBuffer函数的包装，在客户端是master时，负责处理如何向子slave进行复制 */
 void processInputBufferAndReplicate(client *c) {
-    if (!(c->flags & CLIENT_MASTER)) {
+    if (!(c->flags & CLIENT_MASTER)) {      // 该实例是top-master, 则通过replicationFeedSlaves复制
         processInputBuffer(c);
-    } else {       // 如果客户端是Master，则不仅需要处理缓冲区中的命令，还需要将命令复制到子Slave上
+    } else {
+        /* 如果客户端是Master，说明该实例不是top-master,
+         * 则不仅需要处理缓冲区中的命令，还需要将命令复制到子Slave上和复制积压缓冲区中 */
         size_t prev_offset = c->reploff;
         processInputBuffer(c);
         size_t applied = c->reploff - prev_offset;
@@ -1516,10 +1515,9 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         serverLog(LL_VERBOSE, "Client closed connection");
         freeClient(c);
         return;
-    } else if (c->flags & CLIENT_MASTER) {      // 如果客户端为Master
-        /* Append the query buffer to the pending (not applied) buffer
-         * of the master. We'll use this buffer later in order to have a
-         * copy of the string applied by the last command executed. */
+    } else if (c->flags & CLIENT_MASTER) {
+        /* 如果客户端为Master，则此命令是一个从master传播过来的命令，将会直接传播到sub-slaves
+         * 追加到pending_querybuf。我们将会在命令执行完成之后同步给sub-slaves。*/
         c->pending_querybuf = sdscatlen(c->pending_querybuf,
                                         c->querybuf+qblen,nread);
     }
@@ -1539,13 +1537,9 @@ void readQueryFromClient(aeEventLoop *el, int fd, void *privdata, int mask) {
         return;
     }
 
-    /* Time to process the buffer. If the client is a master we need to
-     * compute the difference between the applied offset before and after
-     * processing the buffer, to understand how much of the replication stream
-     * was actually applied to the master state: this quantity, and its
-     * corresponding part of the replication stream, will be propagated to
-     * the sub-slaves and to the replication backlog. */
-    /* 处理输入缓冲区中的数据，并且进行复制操作。 */
+    /* 处理输入缓冲区中的数据，并且进行复制操作。
+     * 在执行命令的前后，我们需要计算偏移量，来了解我们已经应用了master的复制流长度，
+     * 之后我们将会把这部分复制流发送给sub-slaves并记录到复制积压缓冲区中。*/
     processInputBufferAndReplicate(c);
 }
 
