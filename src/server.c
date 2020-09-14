@@ -1327,7 +1327,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
         if (server.cluster_enabled) clusterCron();
     }
 
-    /* Run the Sentinel timer if we are in sentinel mode. */
+    /* 如果我们是Sentinel模式，我们运行一个周期函数 */
     if (server.sentinel_mode) sentinelTimer();
 
     /* Cleanup expired MIGRATE cached sockets. */
@@ -3822,8 +3822,10 @@ void setupSignalHandlers(void) {
 
 void memtest(size_t megabytes, int passes);
 
-/* Returns 1 if there is --sentinel among the arguments or if
- * argv[0] contains "redis-sentinel". */
+/* 检查是否以sentinel模式启动：
+ * 1) 启动命令为redis-sentinel
+ * 2) 带有--sentinel命令行标志
+ * */
 int checkForSentinelMode(int argc, char **argv) {
     int j;
 
@@ -4043,9 +4045,7 @@ int main(int argc, char **argv) {
     server.exec_argv[argc] = NULL;
     for (j = 0; j < argc; j++) server.exec_argv[j] = zstrdup(argv[j]);
 
-    /* We need to init sentinel right now as parsing the configuration file
-     * in sentinel mode will have the effect of populating the sentinel
-     * data structures with master nodes to monitor. */
+    /* 初始化配置文件和数据结构 */
     if (server.sentinel_mode) {
         initSentinelConfig();
         initSentinel();
