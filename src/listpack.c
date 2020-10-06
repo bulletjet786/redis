@@ -229,7 +229,7 @@ void lpFree(unsigned char *lp) {
 int lpEncodeGetType(unsigned char *ele, uint32_t size, unsigned char *intenc, uint64_t *enclen) {
     int64_t v;
     /* 如果可以编码为64位带符号整数 */
-    if (lpStringToInt64((const char*)ele, size, &v)) {lpEncodeGetType
+    if (lpStringToInt64((const char*)ele, size, &v)) {
         if (v >= 0 && v <= 127) {
             // 如果整数在0-127，则使用一个7位表示法-占用1个字节
             intenc[0] = v;

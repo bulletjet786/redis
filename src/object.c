@@ -226,7 +226,7 @@ robj *createZiplistObject(void) {
 }
 
 robj *createSetObject(void) {
-    dict *d = dic tCreate(&setDictType,NULL);
+    dict *d = dictCreate(&setDictType,NULL);
     robj *o = createObject(OBJ_SET,d);
     o->encoding = OBJ_ENCODING_HT;
     return o;

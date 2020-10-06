@@ -2425,9 +2425,6 @@ void sentinelReceiveHelloMessages(redisAsyncContext *c, void *reply, void *privd
     if (!reply || !ri) return;
     r = reply;
 
-    /* Update the last activity in the pubsub channel. Note that since we
-     * receive our messages as well this timestamp can be used to detect
-     * if the link is probably disconnected even if it seems otherwise. */
     /* 更新订阅连接的最后活跃时间。注意：我们收到消息的这个时间点可以用来做连接的活跃度检测。 */
     ri->link->pc_last_activity = mstime();
 
@@ -3866,7 +3863,7 @@ int sentinelStartFailoverIfNeeded(sentinelRedisInstance *master) {
  *      我们应该根据复制偏移量选择一个最好的slave。
  * 5) slave优先级不能为0，不然我们会放弃这个。
  * 满足以上条件时，我们将会按照以下条件排序：
- * - 更大的优先级
+ * - 更小的优先级
  * - 更大的复制偏移量
  * - 更小字典序的runid
  * 如果找到了合适的slave，将会返回，没找到则返回NULL */

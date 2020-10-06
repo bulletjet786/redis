@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 2.8)
+PROJECT(redis-5.0)
+#message(${PROJECT_SOURCE_DIR})
+#message(${PROJECT_BINARY_DIR})
+add_subdirectory(src)

@@ -219,6 +219,7 @@ void evictionPoolPopulate(int dbid, dict *sampledict, dict *keydict, struct evic
                 pool[k].cached = cached;
             } else {
                 k--;
+                sds cached = pool[0].cached;
                 if (pool[0].key != pool[0].cached) sdsfree(pool[0].key);
                 memmove(pool,pool+1,sizeof(pool[0])*k);
                 pool[k].cached = cached;
