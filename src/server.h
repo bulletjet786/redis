@@ -1298,8 +1298,10 @@ struct redisCommand {
     int flags;    /* The actual flags, obtained from the 'sflags' field. */
     /* Use a function to determine keys arguments in a command line.
      * Used for Redis Cluster redirect. */
+    /* 使用一个函数来定位一行命令中的keys的参数，用于在Redis Cluster进行重定位 */
     redisGetKeysProc *getkeys_proc;
     /* What keys should be loaded in background when calling this command? */
+    /* 当调用这个命令时，哪些keys需要在后台加载。 */
     int firstkey; /* The first argument that's a key (0 = no keys) */
     int lastkey;  /* The last argument that's a key */
     int keystep;  /* The step between first and last key */

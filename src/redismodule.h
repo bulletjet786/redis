@@ -174,7 +174,7 @@ typedef struct RedisModuleTypeMethods {
 #define REDISMODULE_GET_API(name) \
     RedisModule_GetApi("RedisModule_" #name, ((void **)&RedisModule_ ## name))
 
-#define REDISMODULE_API_FUNC(x) (*x)
+#define REDISMODULE_API_FUNC(x) (*(x))
 
 
 void *REDISMODULE_API_FUNC(RedisModule_Alloc)(size_t bytes);
@@ -334,7 +334,7 @@ void REDISMODULE_API_FUNC(RedisModule_SetDisconnectCallback)(RedisModuleBlockedC
 void REDISMODULE_API_FUNC(RedisModule_SetClusterFlags)(RedisModuleCtx *ctx, uint64_t flags);
 #endif
 
-/* This is included inline inside each Redis module. */
+/* 这些将会内联在每一个Redis Module中 */
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) __attribute__((unused));
 static int RedisModule_Init(RedisModuleCtx *ctx, const char *name, int ver, int apiver) {
     void *getapifuncptr = ((void**)ctx)[0];

@@ -2524,11 +2524,8 @@ void call(client *c, int flags) {
 /* 当整个命令读取完成的时候，将会执行该函数，命令参数及其数量存放在argv和argc字段中 */
 /* 当命令合法，操作被执行且客户端仍处于连接状态时返回OK，否则返回ERR */
 int processCommand(client *c) {
-    /* The QUIT command is handled separately. Normal command procs will
-     * go through checking for replication and QUIT will cause trouble
-     * when FORCE_REPLICATION is enabled and would be implemented in
-     * a regular command proc. */
-    // QUIT命令需要特殊处理。
+    // QUIT命令需要特殊处理。正常的命令将会负责，但是如果FORCE_REPLICATION开启时，
+    // 将会传播给slaves。
     if (!strcasecmp(c->argv[0]->ptr,"quit")) {
         addReply(c,shared.ok);
         c->flags |= CLIENT_CLOSE_AFTER_REPLY;

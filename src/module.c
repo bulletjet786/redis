@@ -34,23 +34,20 @@
 #define REDISMODULE_CORE 1
 #include "redismodule.h"
 
-/* --------------------------------------------------------------------------
- * Private data structures used by the modules system. Those are data
- * structures that are never exposed to Redis Modules, if not as void
- * pointers that have an API the module can call with them)
- * -------------------------------------------------------------------------- */
+/* 模块系统使用的私有数据结构。
+ * 如果没有相关的API, 这些数据结构并不会暴露给Redis Module。*/
 
-/* This structure represents a module inside the system. */
+/* 代表系统内部的结构 */
 struct RedisModule {
-    void *handle;   /* Module dlopen() handle. */
-    char *name;     /* Module name. */
-    int ver;        /* Module version. We use just progressive integers. */
-    int apiver;     /* Module API version as requested during initialization.*/
-    list *types;    /* Module data types. */
+    void *handle;   /* 模块dlopen()处理器 */
+    char *name;     /* 模块名称 */
+    int ver;        /* 模块版本, 使用一个增长的整数表示。 */
+    int apiver;     /* 在初始化时请求的模块的API版本 */
+    list *types;    /* 模块需要的数据类型 */
 };
 typedef struct RedisModule RedisModule;
 
-static dict *modules; /* Hash table of modules. SDS -> RedisModule ptr.*/
+static dict *modules; /* modules的哈希表 SDS -> RedisModule */
 
 /* Entries in the context->amqueue array, representing objects to free
  * when the callback returns. */
@@ -100,9 +97,9 @@ typedef struct RedisModulePoolAllocBlock {
 struct RedisModuleBlockedClient;
 
 struct RedisModuleCtx {
-    void *getapifuncptr;            /* NOTE: Must be the first field. */
-    struct RedisModule *module;     /* Module reference. */
-    client *client;                 /* Client calling a command. */
+    void *getapifuncptr;            /* 注意：必须是第一个域 */
+    struct RedisModule *module;     /* 引用到对应的Module */
+    client *client;                 /* 调用该命令的客户端 */
     struct RedisModuleBlockedClient *blocked_client; /* Blocked client for
                                                         thread safe context. */
     struct AutoMemEntry *amqueue;   /* Auto memory queue of objects to free. */
@@ -164,6 +161,7 @@ typedef int (*RedisModuleCmdFunc) (RedisModuleCtx *ctx, void **argv, int argc);
 typedef void (*RedisModuleDisconnectFunc) (RedisModuleCtx *ctx, struct RedisModuleBlockedClient *bc);
 
 /* This struct holds the information about a command registered by a module.*/
+/* 这个结构保存Module注册的命令信息 */
 struct RedisModuleCommandProxy {
     struct RedisModule *module;
     RedisModuleCmdFunc func;
@@ -498,8 +496,7 @@ void moduleHandlePropagationAfterCommandCallback(RedisModuleCtx *ctx) {
     }
 }
 
-/* This Redis command binds the normal Redis command invocation with commands
- * exported by modules. */
+/* 将这个从module中导出的命令命令绑定到一个正常的Redis命令上。 */
 void RedisModuleCommandDispatcher(client *c) {
     RedisModuleCommandProxy *cp = (void*)(unsigned long)c->cmd->getkeys_proc;
     RedisModuleCtx ctx = REDISMODULE_CTX_INIT;
@@ -592,58 +589,27 @@ int commandFlagsFromString(char *s) {
     return flags;
 }
 
-/* Register a new command in the Redis server, that will be handled by
- * calling the function pointer 'func' using the RedisModule calling
- * convention. The function returns REDISMODULE_ERR if the specified command
- * name is already busy or a set of invalid flags were passed, otherwise
- * REDISMODULE_OK is returned and the new command is registered.
+/* 注册一个新的命令到Redis服务器，将会通过Redis Module协议来处理对应的请求。
+ * 如果命令名已经存在或者标识位出现错误将会返回C_ERR，否则返回C_OK。
+ * 这个函数必须在RedisModule_OnLoad()中调用，在初始化函数之外调用的行为是未定义的。
+ * 命令函数的形式应如下所示：
+ * int MyCommand_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc)
  *
- * This function must be called during the initialization of the module
- * inside the RedisModule_OnLoad() function. Calling this function outside
- * of the initialization function is not defined.
- *
- * The command function type is the following:
- *
- *      int MyCommand_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, int argc);
- *
- * And is supposed to always return REDISMODULE_OK.
- *
- * The set of flags 'strflags' specify the behavior of the command, and should
- * be passed as a C string composed of space separated words, like for
- * example "write deny-oom". The set of flags are:
- *
- * * **"write"**:     The command may modify the data set (it may also read
- *                    from it).
- * * **"readonly"**:  The command returns data from keys but never writes.
- * * **"admin"**:     The command is an administrative command (may change
- *                    replication or perform similar tasks).
- * * **"deny-oom"**:  The command may use additional memory and should be
- *                    denied during out of memory conditions.
- * * **"deny-script"**:   Don't allow this command in Lua scripts.
- * * **"allow-loading"**: Allow this command while the server is loading data.
- *                        Only commands not interacting with the data set
- *                        should be allowed to run in this mode. If not sure
- *                        don't use this flag.
- * * **"pubsub"**:    The command publishes things on Pub/Sub channels.
- * * **"random"**:    The command may have different outputs even starting
- *                    from the same input arguments and key values.
- * * **"allow-stale"**: The command is allowed to run on slaves that don't
- *                      serve stale data. Don't use if you don't know what
- *                      this means.
- * * **"no-monitor"**: Don't propagate the command on monitor. Use this if
- *                     the command has sensible data among the arguments.
- * * **"fast"**:      The command time complexity is not greater
- *                    than O(log(N)) where N is the size of the collection or
- *                    anything else representing the normal scalability
- *                    issue with the command.
- * * **"getkeys-api"**: The command implements the interface to return
- *                      the arguments that are keys. Used when start/stop/step
- *                      is not enough because of the command syntax.
- * * **"no-cluster"**: The command should not register in Redis Cluster
- *                     since is not designed to work with it because, for
- *                     example, is unable to report the position of the
- *                     keys, programmatically creates key names, or any
- *                     other reason.
+ * "strflags"是一个集合，用来指定该命令的行为，形式如"write deny-oom"
+ * write： 命令可能会修改数据集。
+ * readonly： 命令是只读的。
+ * admin： 管理员命令，可能会改变复制或其它类似的任务。
+ * deny-oom： 可能会增加内存，受内存淘汰策略影响。
+ * deny-script： 不允许在Lua脚本中执行。
+ * allow-loading： 允许在加载数据集时执行，仅在命令不与数据集交互式执行。
+ * pubsub： 这个命令会通过Pub/Sub发布信息。
+ * random： 该命令受随机化影响。
+ * allow-stale： 该命令可以在从服务器用陈旧的数据响应给客户端。
+ * no-monitor： 该命令的参数中有敏感信息，不要传播给monitor。
+ * fast： 该命令的时间复杂度不大于O(logN)。
+ * getkeys-api： 该命令实现了用来返回keys的接口，使用first/last/step无法描述key。
+ * no-cluster： 该命令不应该在Redis Cluster中注册，可能是不支持报告keys的位置，
+ *              以编程方式创建key名，或者其它原因。
  */
 int RM_CreateCommand(RedisModuleCtx *ctx, const char *name, RedisModuleCmdFunc cmdfunc, const char *strflags, int firstkey, int lastkey, int keystep) {
     int flags = strflags ? commandFlagsFromString((char*)strflags) : 0;
@@ -655,19 +621,15 @@ int RM_CreateCommand(RedisModuleCtx *ctx, const char *name, RedisModuleCmdFunc c
     RedisModuleCommandProxy *cp;
     sds cmdname = sdsnew(name);
 
-    /* Check if the command name is busy. */
+    /* 检查是否有重名的命令 */
     if (lookupCommand(cmdname) != NULL) {
         sdsfree(cmdname);
         return REDISMODULE_ERR;
     }
 
-    /* Create a command "proxy", which is a structure that is referenced
-     * in the command table, so that the generic command that works as
-     * binding between modules and Redis, can know what function to call
-     * and what the module is.
-     *
-     * Note that we use the Redis command table 'getkeys_proc' in order to
-     * pass a reference to the command proxy structure. */
+    /* 创建一个命令代理，绑定到一个正常的Redis命令上，添加到命令表中，
+     * 这样我们可以从这个正常的Redis命令找到原Module。
+     * 注意：我们使用Redis的getkeys_proc来保存cp结构 */
     cp = zmalloc(sizeof(*cp));
     cp->module = ctx->module;
     cp->func = cmdfunc;
@@ -4712,7 +4674,7 @@ void moduleFreeModuleStructure(struct RedisModule *module) {
 }
 
 void moduleUnregisterCommands(struct RedisModule *module) {
-    /* Unregister all the commands registered by this module. */
+    /* 注销这个Module注册的所有明林 */
     dictIterator *di = dictGetSafeIterator(server.commands);
     dictEntry *de;
     while ((de = dictNext(di)) != NULL) {
@@ -4733,8 +4695,7 @@ void moduleUnregisterCommands(struct RedisModule *module) {
     dictReleaseIterator(di);
 }
 
-/* Load a module and initialize it. On success C_OK is returned, otherwise
- * C_ERR is returned. */
+/* 加载一个Module并且初始化它，成功返回C_OK，失败返回C_ERR。 */
 int moduleLoad(const char *path, void **module_argv, int module_argc) {
     int (*onload)(void *, void **, int);
     void *handle;
@@ -4764,7 +4725,7 @@ int moduleLoad(const char *path, void **module_argv, int module_argc) {
         return C_ERR;
     }
 
-    /* Redis module loaded! Register it. */
+    /* Redis Module加载成功，注册它。 */
     dictAdd(modules,ctx.module->name,ctx.module);
     ctx.module->handle = handle;
     serverLog(LL_NOTICE,"Module '%s' loaded from %s",ctx.module->name,path);
@@ -4772,13 +4733,9 @@ int moduleLoad(const char *path, void **module_argv, int module_argc) {
     return C_OK;
 }
 
-
-/* Unload the module registered with the specified name. On success
- * C_OK is returned, otherwise C_ERR is returned and errno is set
- * to the following values depending on the type of error:
- *
- * * ENONET: No such module having the specified name.
- * * EBUSY: The module exports a new data type and can only be reloaded. */
+/* 卸载使用指定名字注册的module。成功时返回C_OK，否则返回C_ERR，并设置error。
+ * ENONET：没有指定名称的模块。
+ * EBUSY：这个模块导出了新的数据类型，仅仅可以重新加载。*/
 int moduleUnload(sds name) {
     struct RedisModule *module = dictFetchValue(modules,name);
 
@@ -4797,9 +4754,9 @@ int moduleUnload(sds name) {
     /* Remove any notification subscribers this module might have */
     moduleUnsubscribeNotifications(module);
 
-    /* Unregister all the hooks. TODO: Yet no hooks support here. */
+    /* 注销所有的hooks. TODO: Yet no hooks support here. */
 
-    /* Unload the dynamic library. */
+    /* 卸载所有的动态连接库 */
     if (dlclose(module->handle) == -1) {
         char *error = dlerror();
         if (error == NULL) error = "Unknown error";
@@ -4807,10 +4764,10 @@ int moduleUnload(sds name) {
             module->name, error);
     }
 
-    /* Remove from list of modules. */
+    /* 从modules中移除module */
     serverLog(LL_NOTICE,"Module %s unloaded",module->name);
     dictDelete(modules,module->name);
-    module->name = NULL; /* The name was already freed by dictDelete(). */
+    module->name = NULL; /* 这个name已经被dictDelete()释放 */
     moduleFreeModuleStructure(module);
 
     return REDISMODULE_OK;
