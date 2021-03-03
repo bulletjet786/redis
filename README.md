@@ -1,3 +1,6 @@
+### 从redis fork而来，目的是为在阅读redis5.0源码的同学，提供中文注释。如果你也在阅读redis源码，请clone这个仓库，切换到comment分支。
+
+
 This README is just a fast *quick start* document. You can find more detailed documentation at [redis.io](https://redis.io).
 
 What is Redis?
