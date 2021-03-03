@@ -160,7 +160,6 @@ struct RedisModuleBlockedClient;
 typedef int (*RedisModuleCmdFunc) (RedisModuleCtx *ctx, void **argv, int argc);
 typedef void (*RedisModuleDisconnectFunc) (RedisModuleCtx *ctx, struct RedisModuleBlockedClient *bc);
 
-/* This struct holds the information about a command registered by a module.*/
 /* 这个结构保存Module注册的命令信息 */
 struct RedisModuleCommandProxy {
     struct RedisModule *module;
@@ -4674,7 +4673,7 @@ void moduleFreeModuleStructure(struct RedisModule *module) {
 }
 
 void moduleUnregisterCommands(struct RedisModule *module) {
-    /* 注销这个Module注册的所有明林 */
+    /* 注销这个Module注册的所有命令 */
     dictIterator *di = dictGetSafeIterator(server.commands);
     dictEntry *de;
     while ((de = dictNext(di)) != NULL) {

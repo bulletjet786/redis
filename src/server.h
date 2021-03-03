@@ -878,22 +878,18 @@ struct redisMemOverhead {
     } *db;
 };
 
-/* This structure can be optionally passed to RDB save/load functions in
- * order to implement additional functionalities, by storing and loading
- * metadata to the RDB file.
- *
- * Currently the only use is to select a DB at load time, useful in
- * replication in order to make sure that chained slaves (slaves of slaves)
- * select the correct DB and are able to accept the stream coming from the
- * top-level master. */
+/* 在RDB文件的保存和加载过程中，这个可选的结构通过保存和加载元数据来实现额外的功能。
+ * 当前仅用于在加载时选择一个数据库，用来确保在链式复制时重启的slaves可以切换到正确的
+ * 数据库，并正常接收顶级master的数据流。
+ * */
 typedef struct rdbSaveInfo {
-    /* Used saving and loading. */
-    int repl_stream_db;  /* DB to select in server.master client. */
+    /* 用于记载和保存 */
+    int repl_stream_db;  /* server.master选择的数据库 */
 
-    /* Used only loading. */
-    int repl_id_is_set;  /* True if repl_id field is set. */
-    char repl_id[CONFIG_RUN_ID_SIZE + 1];     /* Replication ID. */
-    long long repl_offset;                  /* Replication offset. */
+    /* 仅用于加载 */
+    int repl_id_is_set;  /* 如果repl_id设置了，则为True */
+    char repl_id[CONFIG_RUN_ID_SIZE + 1];     /* 复制ID */
+    long long repl_offset;                  /* 复制偏移量 */
 } rdbSaveInfo;
 
 #define RDB_SAVE_INFO_INIT {-1,0,"000000000000000000000000000000",-1}

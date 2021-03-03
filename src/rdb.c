@@ -621,7 +621,7 @@ int rdbLoadBinaryFloatValue(rio *rdb, float *val) {
     return 0;
 }
 
-/* Save the object type of object "o". */
+/* 保存type类型的数据对象o */
 int rdbSaveObjectType(rio *rdb, robj *o) {
     switch (o->type) {
     case OBJ_STRING:
@@ -1091,14 +1091,11 @@ int rdbSaveInfoAuxFields(rio *rdb, int flags, rdbSaveInfo *rsi) {
     return 1;
 }
 
-/* Produces a dump of the database in RDB format sending it to the specified
- * Redis I/O channel. On success C_OK is returned, otherwise C_ERR
- * is returned and part of the output, or all the output, can be
- * missing because of I/O errors.
+/* 生产一个RDB格式的数据库文件，并发送到指定的Redis IO通道。
+ * 成功返回C_OK，失败返回C_ERR，并且所有的输出都可以丢弃了。
  *
- * When the function returns C_ERR and if 'error' is not NULL, the
- * integer pointed by 'error' is set to the value of errno just after the I/O
- * error. */
+ * 当返回了C_ERR，并且err不为NULL时，这个error入参将会保持errno的值。
+ * */
 int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
     dictIterator *di = NULL;
     dictEntry *de;
@@ -1110,8 +1107,8 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
     if (server.rdb_checksum)
         rdb->update_cksum = rioGenericUpdateChecksum;
     snprintf(magic,sizeof(magic),"REDIS%04d",RDB_VERSION);
-    if (rdbWriteRaw(rdb,magic,9) == -1) goto werr;
-    if (rdbSaveInfoAuxFields(rdb,flags,rsi) == -1) goto werr;
+    if (rdbWriteRaw(rdb,magic,9) == -1) goto werr;          // 写入魔数："REDIS"+RDB版本
+    if (rdbSaveInfoAuxFields(rdb,flags,rsi) == -1) goto werr;   // 写入辅助域
 
     for (j = 0; j < server.dbnum; j++) {
         redisDb *db = server.db+j;
@@ -1168,7 +1165,7 @@ int rdbSaveRio(rio *rdb, int *error, int flags, rdbSaveInfo *rsi) {
             robj *body = dictGetVal(de);
             if (rdbSaveAuxField(rdb,"lua",3,body->ptr,sdslen(body->ptr)) == -1)
                 goto werr;
-        }
+        r
         dictReleaseIterator(di);
         di = NULL; /* So that we don't release it again on error. */
     }
@@ -1215,10 +1212,10 @@ werr: /* Write error. */
     return C_ERR;
 }
 
-/* Save the DB on disk. Return C_ERR on error, C_OK on success. */
+/* 保存数据库到磁盘上。成功返回C_OK，失败返回C_ERR。 */
 int rdbSave(char *filename, rdbSaveInfo *rsi) {
     char tmpfile[256];
-    char cwd[MAXPATHLEN]; /* Current working dir path for error messages. */
+    char cwd[MAXPATHLEN]; /* 用于记录错误消息的当前工作目录 */
     FILE *fp;
     rio rdb;
     int error = 0;
@@ -2402,9 +2399,7 @@ void saveCommand(client *c) {
 void bgsaveCommand(client *c) {
     int schedule = 0;
 
-    /* The SCHEDULE option changes the behavior of BGSAVE when an AOF rewrite
-     * is in progress. Instead of returning an error a BGSAVE gets scheduled. */
-    /* 在后台正在进行AOF重写时，SCHEDULE选项将会在之后记性调度而不是直接返回一个错误。 */
+    /* 在后台正在进行AOF重写时，SCHEDULE选项将会改变调度行为，在AOF重写之后进行调度，而不是直接返回一个错误。 */
     if (c->argc > 1) {
         if (c->argc == 2 && !strcasecmp(c->argv[1]->ptr,"schedule")) {
             schedule = 1;
